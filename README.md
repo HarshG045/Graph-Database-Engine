@@ -133,6 +133,8 @@ Graph Database Engine/
 ├── out/               (compiled .class files — created by build)
 ├── compile.bat        (Windows compile script)
 ├── run.bat            (Windows compile-and-run script)
+├── compile.sh         (Linux / macOS compile script)
+├── run.sh             (Linux / macOS compile-and-run script)
 └── README.md
 ```
 
@@ -141,7 +143,8 @@ Graph Database Engine/
 ## Requirements
 
 - **Java 8 or later** (uses only the standard library — no external dependencies)
-- Windows command prompt for the `.bat` scripts, or any terminal capable of running `javac`/`java`
+- **Windows** — use the provided `.bat` scripts or run `javac`/`java` directly
+- **Linux / macOS** — use the provided `.sh` scripts (requires `bash`)
 
 ---
 
@@ -161,7 +164,26 @@ run.bat
 
 `run.bat` will recompile automatically if needed, then launch the interactive REPL.
 
-### Option 2: Manual commands
+### Option 2: Use the provided scripts (Linux / macOS)
+
+Make the scripts executable once:
+```bash
+chmod +x compile.sh run.sh
+```
+
+**Compile only:**
+```bash
+./compile.sh
+```
+
+**Compile and run:**
+```bash
+./run.sh
+```
+
+`run.sh` will recompile automatically if needed, then launch the interactive REPL.
+
+### Option 3: Manual commands
 
 **Compile:**
 ```bat
@@ -173,7 +195,7 @@ javac -d out src\Main.java src\model\*.java src\schema\*.java src\storage\*.java
 java -cp out Main
 ```
 
-### Option 3: Run the built-in demo
+### Option 4: Run the built-in demo
 
 After starting the REPL, type:
 ```
