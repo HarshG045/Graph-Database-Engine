@@ -150,6 +150,44 @@ public class QueryParser {
             return q;
         }
 
+        // ── Graph Analysis ────────────────────────────────────────────
+        if (upper.startsWith("DEGREE")) {
+            Query q = new Query(Query.Type.DEGREE);
+            q.setNodeId(stripPrefix(trimmed, "DEGREE").trim());
+            return q;
+        }
+        if (upper.equals("STATS")) {
+            return new Query(Query.Type.STATS);
+        }
+        if (upper.equals("COMPONENTS")) {
+            return new Query(Query.Type.CONNECTED_COMPONENTS);
+        }
+        if (upper.equals("HAS CYCLE")) {
+            return new Query(Query.Type.HAS_CYCLE);
+        }
+        if (upper.startsWith("PATH EXISTS")) {
+            return parsePathExists(trimmed);
+        }
+
+        // ── Export ────────────────────────────────────────────────────
+        if (upper.startsWith("EXPORT DOT")) {
+            Query q = new Query(Query.Type.EXPORT_DOT);
+            String rest = stripPrefix(trimmed, "EXPORT DOT").trim();
+            if (!rest.isEmpty()) q.setFilePath(rest);
+            return q;
+        }
+        if (upper.startsWith("EXPORT CSV")) {
+            Query q = new Query(Query.Type.EXPORT_CSV);
+            String rest = stripPrefix(trimmed, "EXPORT CSV").trim();
+            if (!rest.isEmpty()) q.setFilePath(rest);
+            return q;
+        }
+
+        // ── History ───────────────────────────────────────────────────
+        if (upper.equals("HISTORY")) {
+            return new Query(Query.Type.HISTORY);
+        }
+
         return new Query(Query.Type.UNKNOWN);
     }
 
@@ -480,6 +518,19 @@ public class QueryParser {
             // COUNT alone → count both
             q.setNodeType("ALL");
         }
+        return q;
+    }
+
+    // PATH EXISTS u1 TO u4 [TYPE FRIENDS]
+    private Query parsePathExists(String input) {
+        Query q = new Query(Query.Type.PATH_EXISTS);
+        String rest = stripPrefix(input, "PATH EXISTS").trim();
+        q.setNodeId(firstToken(rest));
+        String toVal = extractKeywordValue(rest, "TO");
+        if (toVal != null) {
+            q.setSecondNodeId(toVal.split("\\s+")[0]);
+        }
+        q.setRelationshipType(extractKeywordValue(rest, "TYPE"));
         return q;
     }
 }

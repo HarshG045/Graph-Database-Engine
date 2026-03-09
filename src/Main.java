@@ -1,10 +1,8 @@
 import engine.GraphEngine;
 import query.Query;
+import query.QueryAutoComplete;
 import query.QueryExecutor;
 import query.QueryParser;
-
-import java.util.NoSuchElementException;
-import java.util.Scanner;
 
 /**
  * Main Entry Point — Interactive CLI
@@ -25,7 +23,9 @@ public class Main {
         "║         GRAPH-ORIENTED DATABASE ENGINE v1.0               ║\n" +
         "║  Schema · Storage · Traversal · Query · Persistence       ║\n" +
         "╚═══════════════════════════════════════════════════════════╝\n" +
-        "  Type HELP for command reference.  Type EXIT to quit.\n";
+        "  Type HELP for command reference.  Type EXIT to quit.\n" +
+        "  Add '?' at the end of input for autocomplete suggestions.\n" +
+        "  Example:  ADD ?   →  shows NODE, EDGE\n";
 
     private static final String HELP =
         "\n╔════════════════════════════════════════════════════════════╗\n" +
@@ -60,18 +60,28 @@ public class Main {
         "║  DFS <nodeId> [TYPE <relType>]                            ║\n" +
         "║  SHORTEST PATH <startId> TO <endId> [TYPE <relType>]      ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
+        "║ Graph Analysis                                             ║\n" +
+        "║  DEGREE <nodeId>       (in/out/total degree)              ║\n" +
+        "║  STATS                 (graph statistics & density)        ║\n" +
+        "║  COMPONENTS            (connected components)              ║\n" +
+        "║  HAS CYCLE             (cycle detection)                   ║\n" +
+        "║  PATH EXISTS <src> TO <dst> [TYPE <rel>]                  ║\n" +
+        "╠════════════════════════════════════════════════════════════╣\n" +
         "║ Aggregation / Counting                                     ║\n" +
         "║  COUNT                        (total nodes and edges)      ║\n" +
         "║  COUNT NODES [TYPE <type>]                                ║\n" +
         "║  COUNT EDGES [TYPE <relType>]                             ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
-        "║ Persistence                                                ║\n" +
+        "║ Export / Persistence                                       ║\n" +
         "║  SAVE [<filepath>]                                        ║\n" +
         "║  LOAD [<filepath>]                                        ║\n" +
+        "║  EXPORT DOT [<filepath>]    (Graphviz DOT format)         ║\n" +
+        "║  EXPORT CSV [<filepath>]    (CSV format)                  ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
         "║ Utility                                                    ║\n" +
         "║  SHOW GRAPH                                               ║\n" +
         "║  SHOW INDEX                                               ║\n" +
+        "║  HISTORY                    (list past commands)           ║\n" +
         "║  CLEAR             (wipe nodes+edges, keep schema)         ║\n" +
         "║  CLEAR ALL         (wipe everything including schema)      ║\n" +
         "║  DEMO                                                     ║\n" +
@@ -82,22 +92,21 @@ public class Main {
     public static void main(String[] args) {
         System.out.println(BANNER);
 
-        GraphEngine   engine   = new GraphEngine();
-        QueryParser   parser   = new QueryParser();
-        QueryExecutor executor = new QueryExecutor(engine);
-        Scanner       scanner  = new Scanner(System.in);
+        GraphEngine      engine   = new GraphEngine();
+        QueryParser      parser   = new QueryParser();
+        QueryExecutor    executor = new QueryExecutor(engine);
+        QueryAutoComplete ac      = new QueryAutoComplete(engine);
+        ConsoleReader    reader   = new ConsoleReader(ac);
 
         while (true) {
-            System.out.print("GDB> ");
-            String input;
-            try {
-                input = scanner.nextLine().trim();
-            } catch (NoSuchElementException e) {
-                // stdin closed (e.g. piped input ended)
+            String input = reader.readLine("GDB> ");
+            if (input == null) {
+                // stdin closed
                 System.out.println("Goodbye.");
                 break;
             }
 
+            input = input.trim();
             if (input.isEmpty()) continue;
 
             String upper = input.toUpperCase();
@@ -118,8 +127,6 @@ public class Main {
             executor.execute(query);
             System.out.println();
         }
-
-        scanner.close();
     }
 
     /**
@@ -183,6 +190,17 @@ public class Main {
             // ── New: DESCRIBE
             "DESCRIBE u1",
 
+            // ── Graph Analysis
+            "DEGREE u1",
+            "STATS",
+            "COMPONENTS",
+            "HAS CYCLE",
+            "PATH EXISTS u1 TO u4",
+            "PATH EXISTS u1 TO u4 TYPE FRIENDS",
+
+            // ── Export
+            "EXPORT DOT",
+
             // ── Index
             "SHOW INDEX",
 
@@ -191,7 +209,6 @@ public class Main {
         };
 
         for (String cmd : commands) {
-            System.out.println("\n  [INPUT] " + cmd);
             executor.execute(parser.parse(cmd));
         }
 

@@ -25,7 +25,9 @@ javac -d out \
     src/query/Query.java \
     src/query/QueryParser.java \
     src/query/QueryExecutor.java \
+    src/query/QueryAutoComplete.java \
     src/storage/StorageManager.java \
+    src/ConsoleReader.java \
     src/Main.java
 
 if [ $? -eq 0 ]; then

@@ -289,4 +289,153 @@ public class TraversalEngine {
         System.out.println("  Nodes:");
         for (Node n : path) System.out.println("    " + n);
     }
+
+    // ─────────────────────────────────────────────
+    //  Degree Analysis
+    // ─────────────────────────────────────────────
+
+    /**
+     * Returns int[3] = {inDegree, outDegree, totalDegree} for a node.
+     */
+    public int[] degree(String nodeId) {
+        validateNodeExists(nodeId);
+        int out = storage.getOutgoingEdges(nodeId).size();
+        int in  = storage.getIncomingEdges(nodeId).size();
+        return new int[]{in, out, in + out};
+    }
+
+    // ─────────────────────────────────────────────
+    //  Connected Components (undirected interpretation)
+    // ─────────────────────────────────────────────
+
+    /**
+     * Finds all connected components treating the graph as undirected.
+     * Returns a list where each element is a list of node IDs in one component.
+     */
+    public List<List<String>> connectedComponents() {
+        List<List<String>> components = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+
+        for (Node node : storage.getAllNodes()) {
+            String id = node.getId();
+            if (!visited.contains(id)) {
+                List<String> component = new ArrayList<>();
+                // BFS treating graph as undirected
+                Queue<String> queue = new LinkedList<>();
+                queue.add(id);
+                visited.add(id);
+                while (!queue.isEmpty()) {
+                    String current = queue.poll();
+                    component.add(current);
+                    // Outgoing neighbors
+                    for (Edge e : storage.getOutgoingEdges(current)) {
+                        if (!visited.contains(e.getDestinationId())) {
+                            visited.add(e.getDestinationId());
+                            queue.add(e.getDestinationId());
+                        }
+                    }
+                    // Incoming neighbors (treat as undirected)
+                    for (Edge e : storage.getIncomingEdges(current)) {
+                        if (!visited.contains(e.getSourceId())) {
+                            visited.add(e.getSourceId());
+                            queue.add(e.getSourceId());
+                        }
+                    }
+                }
+                Collections.sort(component);
+                components.add(component);
+            }
+        }
+        return components;
+    }
+
+    // ─────────────────────────────────────────────
+    //  Cycle Detection (directed graph)
+    // ─────────────────────────────────────────────
+
+    /**
+     * Detects if the directed graph contains at least one cycle.
+     * Uses DFS with three-color marking (WHITE/GRAY/BLACK).
+     *
+     * @return list of node IDs forming the first cycle found, or empty if acyclic
+     */
+    public List<String> detectCycle() {
+        // 0 = white (unvisited), 1 = gray (in current path), 2 = black (done)
+        Map<String, Integer> color = new HashMap<>();
+        Map<String, String> parent = new HashMap<>();
+        for (Node n : storage.getAllNodes()) {
+            color.put(n.getId(), 0);
+        }
+
+        for (Node n : storage.getAllNodes()) {
+            if (color.get(n.getId()) == 0) {
+                List<String> cycle = dfsCycleVisit(n.getId(), color, parent);
+                if (cycle != null) return cycle;
+            }
+        }
+        return new ArrayList<>(); // no cycle
+    }
+
+    private List<String> dfsCycleVisit(String nodeId, Map<String, Integer> color,
+                                        Map<String, String> parent) {
+        color.put(nodeId, 1); // gray
+        for (Edge e : storage.getOutgoingEdges(nodeId)) {
+            String neighbor = e.getDestinationId();
+            if (color.getOrDefault(neighbor, 0) == 1) {
+                // Back edge found — reconstruct cycle
+                List<String> cycle = new ArrayList<>();
+                cycle.add(neighbor);
+                String cur = nodeId;
+                while (!cur.equals(neighbor)) {
+                    cycle.add(cur);
+                    cur = parent.get(cur);
+                    if (cur == null) break;
+                }
+                cycle.add(neighbor);
+                Collections.reverse(cycle);
+                return cycle;
+            }
+            if (color.getOrDefault(neighbor, 0) == 0) {
+                parent.put(neighbor, nodeId);
+                List<String> cycle = dfsCycleVisit(neighbor, color, parent);
+                if (cycle != null) return cycle;
+            }
+        }
+        color.put(nodeId, 2); // black
+        return null;
+    }
+
+    // ─────────────────────────────────────────────
+    //  Path Exists (quick boolean check)
+    // ─────────────────────────────────────────────
+
+    /**
+     * Checks if any path exists from startId to endId.
+     * Optionally filters by relationship type.
+     */
+    public boolean pathExists(String startId, String endId, String relationshipType) {
+        validateNodeExists(startId);
+        validateNodeExists(endId);
+        if (startId.equals(endId)) return true;
+
+        Set<String> seen = new HashSet<>();
+        Queue<String> queue = new LinkedList<>();
+        queue.add(startId);
+        seen.add(startId);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (Edge e : storage.getOutgoingEdges(current)) {
+                if (relationshipType != null && !e.getRelationshipType().equals(relationshipType))
+                    continue;
+                String neighbor = e.getDestinationId();
+                if (neighbor.equals(endId)) return true;
+                if (!seen.contains(neighbor)) {
+                    seen.add(neighbor);
+                    queue.add(neighbor);
+                }
+            }
+        }
+        return false;
+    }
 }

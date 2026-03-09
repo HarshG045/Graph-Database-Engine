@@ -1,0 +1,81 @@
+REM ═══════════════════════════════════════════════════════════════
+REM  GRAPH DATABASE ENGINE — DEMO SCRIPT
+REM  This file contains commands that demonstrate all features.
+REM  Run with:  demo.bat
+REM ═══════════════════════════════════════════════════════════════
+
+REM ── SCHEMA DEFINITION (DDL) ──────────────────────────────────
+CREATE NODE TYPE User REQUIRED name,age OPTIONAL email
+CREATE NODE TYPE Company REQUIRED name OPTIONAL industry
+CREATE RELATIONSHIP TYPE FRIENDS FROM User TO User OPTIONAL since
+CREATE RELATIONSHIP TYPE WORKS_AT FROM User TO Company REQUIRED role
+SHOW SCHEMA
+
+REM ── ADD NODES ────────────────────────────────────────────────
+ADD NODE u1 TYPE User PROPERTIES name=Alice,age=30,email=alice@example.com
+ADD NODE u2 TYPE User PROPERTIES name=Bob,age=25
+ADD NODE u3 TYPE User PROPERTIES name=Carol,age=28
+ADD NODE u4 TYPE User PROPERTIES name=Dave,age=35
+ADD NODE c1 TYPE Company PROPERTIES name=TechCorp,industry=Software
+ADD NODE c2 TYPE Company PROPERTIES name=DataInc,industry=Analytics
+
+REM ── ADD EDGES ────────────────────────────────────────────────
+ADD EDGE u1 TO u2 TYPE FRIENDS PROPERTIES since=2020
+ADD EDGE u2 TO u3 TYPE FRIENDS PROPERTIES since=2021
+ADD EDGE u3 TO u4 TYPE FRIENDS
+ADD EDGE u1 TO c1 TYPE WORKS_AT PROPERTIES role=Engineer
+ADD EDGE u2 TO c1 TYPE WORKS_AT PROPERTIES role=Manager
+ADD EDGE u4 TO c2 TYPE WORKS_AT PROPERTIES role=Analyst
+
+REM ── SHOW FULL GRAPH ─────────────────────────────────────────
+SHOW GRAPH
+
+REM ── QUERY / RETRIEVAL ───────────────────────────────────────
+FIND User
+FIND User WHERE age=25
+FIND Company WHERE industry=Software
+NEIGHBORS u1
+DESCRIBE u1
+
+REM ── TRAVERSAL ───────────────────────────────────────────────
+BFS u1
+DFS u1
+SHORTEST PATH u1 TO u4
+SHORTEST PATH u1 TO u4 TYPE FRIENDS
+
+REM ── GRAPH ANALYSIS ──────────────────────────────────────────
+DEGREE u1
+DEGREE u4
+STATS
+COMPONENTS
+HAS CYCLE
+PATH EXISTS u1 TO u4
+PATH EXISTS u1 TO u4 TYPE FRIENDS
+PATH EXISTS c1 TO c2
+
+REM ── AGGREGATION / COUNTING ──────────────────────────────────
+COUNT
+COUNT NODES
+COUNT NODES TYPE User
+COUNT NODES TYPE Company
+COUNT EDGES TYPE FRIENDS
+COUNT EDGES TYPE WORKS_AT
+
+REM ── UPDATE DATA ─────────────────────────────────────────────
+UPDATE NODE u2 SET age=26
+FIND User WHERE age=26
+
+REM ── EXPORT ──────────────────────────────────────────────────
+EXPORT DOT
+EXPORT CSV
+
+REM ── INDEX ───────────────────────────────────────────────────
+SHOW INDEX
+
+REM ── PERSISTENCE ─────────────────────────────────────────────
+SAVE demo_graph.gdb
+
+REM ── COMMAND HISTORY ─────────────────────────────────────────
+HISTORY
+
+EXIT

@@ -44,6 +44,17 @@ public class Query {
         DFS,
         SHORTEST_PATH,
 
+        // Graph Analysis
+        DEGREE,             // DEGREE <nodeId>
+        STATS,              // STATS
+        CONNECTED_COMPONENTS, // COMPONENTS
+        HAS_CYCLE,          // HAS CYCLE
+        PATH_EXISTS,        // PATH EXISTS <src> TO <dst> [TYPE <relType>]
+
+        // Export
+        EXPORT_DOT,         // EXPORT DOT [<filepath>]
+        EXPORT_CSV,         // EXPORT CSV [<filepath>]
+
         // Persistence
         SAVE,
         LOAD,
@@ -54,6 +65,7 @@ public class Query {
         COUNT,              // COUNT NODES [TYPE <type>] / COUNT EDGES [TYPE <relType>]
         CLEAR,              // CLEAR / CLEAR ALL
         DESCRIBE,           // DESCRIBE <nodeId>
+        HISTORY,            // HISTORY
         UNKNOWN
     }
 
