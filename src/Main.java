@@ -37,6 +37,9 @@ public class Main {
         "║         [REQUIRED p1] [OPTIONAL p2]                        ║\n" +
         "║  DROP NODE TYPE <name>       (blocked if nodes exist)      ║\n" +
         "║  DROP RELATIONSHIP TYPE <name>  (blocked if edges exist)   ║\n" +
+        "║  ALTER NODE TYPE <name> ADD REQUIRED|OPTIONAL <prop>       ║\n" +
+        "║  ALTER RELATIONSHIP TYPE <name> ADD REQUIRED|OPT <prop>    ║\n" +
+        "║  REMOVE PROPERTY <type> <property>                        ║\n" +
         "║  SHOW SCHEMA                                               ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
         "║ DML — Node Operations                                      ║\n" +
@@ -51,7 +54,10 @@ public class Main {
         "║  UPDATE EDGE <srcId> TO <dstId> TYPE <relType> SET k=v    ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
         "║ Query / Retrieval                                          ║\n" +
-        "║  FIND <type> [WHERE <key>=<value>]                        ║\n" +
+        "║  FIND <type> [WHERE <key> <op> <value>]                   ║\n" +
+        "║       Operators: =  !=  <  <=  >  >=                      ║\n" +
+        "║       Compound:  WHERE age > 25 AND name = Alice          ║\n" +
+        "║                  WHERE age < 20 OR city = NYC             ║\n" +
         "║  NEIGHBORS <nodeId>                                        ║\n" +
         "║  DESCRIBE <nodeId>    (full node detail + all edges)       ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
@@ -59,6 +65,8 @@ public class Main {
         "║  BFS <nodeId> [TYPE <relType>]                            ║\n" +
         "║  DFS <nodeId> [TYPE <relType>]                            ║\n" +
         "║  SHORTEST PATH <startId> TO <endId> [TYPE <relType>]      ║\n" +
+        "║  WEIGHTED SHORTEST PATH <s> TO <e> WEIGHT <prop>          ║\n" +
+        "║         [TYPE <relType>]                                   ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
         "║ Graph Analysis                                             ║\n" +
         "║  DEGREE <nodeId>       (in/out/total degree)              ║\n" +
@@ -72,13 +80,15 @@ public class Main {
         "║  COUNT NODES [TYPE <type>]                                ║\n" +
         "║  COUNT EDGES [TYPE <relType>]                             ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
-        "║ Export / Persistence                                       ║\n" +
+        "║ Import / Export / Persistence                              ║\n" +
         "║  SAVE [<filepath>]                                        ║\n" +
-        "║  LOAD [<filepath>]                                        ║\n" +
+        "║  LOAD [<filepath>]        (validates data after loading)   ║\n" +
+        "║  IMPORT CSV <filepath>    (import nodes/edges from CSV)    ║\n" +
         "║  EXPORT DOT [<filepath>]    (Graphviz DOT format)         ║\n" +
         "║  EXPORT CSV [<filepath>]    (CSV format)                  ║\n" +
         "╠════════════════════════════════════════════════════════════╣\n" +
         "║ Utility                                                    ║\n" +
+        "║  EXPLAIN <command>      (show query execution plan)        ║\n" +
         "║  SHOW GRAPH                                               ║\n" +
         "║  SHOW INDEX                                               ║\n" +
         "║  HISTORY                    (list past commands)           ║\n" +
@@ -197,6 +207,20 @@ public class Main {
             "HAS CYCLE",
             "PATH EXISTS u1 TO u4",
             "PATH EXISTS u1 TO u4 TYPE FRIENDS",
+
+            // ── New features: Range query & Compound conditions
+            "FIND User WHERE age > 25",
+            "FIND User WHERE age >= 28 AND age <= 35",
+
+            // ── New features: Weighted shortest path
+            "WEIGHTED SHORTEST PATH u1 TO u4 WEIGHT since TYPE FRIENDS",
+
+            // ── New features: ALTER TYPE
+            "ALTER NODE TYPE User ADD OPTIONAL phone",
+            "SHOW SCHEMA",
+
+            // ── New features: EXPLAIN
+            "EXPLAIN FIND User WHERE age > 25",
 
             // ── Export
             "EXPORT DOT",

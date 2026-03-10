@@ -1,6 +1,6 @@
 [SCHEMA_NODE_TYPES]
 Company|req:name|opt:industry
-User|req:name,age|opt:email
+User|req:name,age|opt:email,phone
 [SCHEMA_RELATIONSHIP_TYPES]
 FRIENDS|User|User|req:|opt:since
 WORKS_AT|User|Company|req:role|opt:

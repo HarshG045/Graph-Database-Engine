@@ -10,6 +10,7 @@ import storage.StorageManager;
 import traversal.TraversalEngine;
 
 import java.io.IOException;
+import java.util.List;
 
 /**
  * Graph Engine — Core Facade
@@ -63,6 +64,14 @@ public class GraphEngine {
     public void load(String filePath) {
         try {
             storageManager.load(schemaManager, storage, propertyIndex, filePath);
+            // Post-load validation
+            List<String> warnings = validator.validateLoadedData();
+            if (!warnings.isEmpty()) {
+                System.out.println("[STORAGE] Loaded with " + warnings.size() + " validation warning(s):");
+                for (String w : warnings) {
+                    System.out.println("  " + w);
+                }
+            }
         } catch (IOException e) {
             System.out.println("[STORAGE] Load failed: " + e.getMessage());
         }

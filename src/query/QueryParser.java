@@ -114,6 +114,9 @@ public class QueryParser {
         if (upper.startsWith("DFS")) {
             return parseBfsOrDfs(trimmed, Query.Type.DFS);
         }
+        if (upper.startsWith("WEIGHTED SHORTEST PATH")) {
+            return parseWeightedShortestPath(trimmed);
+        }
         if (upper.startsWith("SHORTEST PATH")) {
             return parseShortestPath(trimmed);
         }
@@ -145,15 +148,19 @@ public class QueryParser {
             return new Query(Query.Type.CLEAR);
         }
         if (upper.startsWith("DESCRIBE")) {
+            String id = stripPrefix(trimmed, "DESCRIBE").trim();
+            if (id.isEmpty()) return new Query(Query.Type.UNKNOWN);
             Query q = new Query(Query.Type.DESCRIBE);
-            q.setNodeId(stripPrefix(trimmed, "DESCRIBE").trim());
+            q.setNodeId(id);
             return q;
         }
 
         // ── Graph Analysis ────────────────────────────────────────────
         if (upper.startsWith("DEGREE")) {
+            String id = stripPrefix(trimmed, "DEGREE").trim();
+            if (id.isEmpty()) return new Query(Query.Type.UNKNOWN);
             Query q = new Query(Query.Type.DEGREE);
-            q.setNodeId(stripPrefix(trimmed, "DEGREE").trim());
+            q.setNodeId(id);
             return q;
         }
         if (upper.equals("STATS")) {
@@ -181,6 +188,32 @@ public class QueryParser {
             String rest = stripPrefix(trimmed, "EXPORT CSV").trim();
             if (!rest.isEmpty()) q.setFilePath(rest);
             return q;
+        }
+
+        // ── Import ─────────────────────────────────────────────────────
+        if (upper.startsWith("IMPORT CSV")) {
+            Query q = new Query(Query.Type.IMPORT_CSV);
+            String rest = stripPrefix(trimmed, "IMPORT CSV").trim();
+            if (!rest.isEmpty()) q.setFilePath(rest);
+            return q;
+        }
+
+        // ── ALTER TYPE ────────────────────────────────────────────────
+        if (upper.startsWith("ALTER NODE TYPE")) {
+            return parseAlterType(trimmed, true);
+        }
+        if (upper.startsWith("ALTER RELATIONSHIP TYPE")) {
+            return parseAlterType(trimmed, false);
+        }
+
+        // ── REMOVE PROPERTY ────────────────────────────────────────────
+        if (upper.startsWith("REMOVE PROPERTY")) {
+            return parseRemoveProperty(trimmed);
+        }
+
+        // ── EXPLAIN ────────────────────────────────────────────────────
+        if (upper.startsWith("EXPLAIN")) {
+            return parseExplain(trimmed);
         }
 
         // ── History ───────────────────────────────────────────────────
@@ -267,9 +300,12 @@ public class QueryParser {
     private Query parseAddNode(String input) {
         Query q = new Query(Query.Type.ADD_NODE);
         String rest = stripPrefix(input, "ADD NODE").trim();
+        if (rest.isEmpty()) return new Query(Query.Type.UNKNOWN);
 
         q.setNodeId(firstToken(rest));
-        q.setNodeType(extractKeywordValue(rest, "TYPE"));
+        String nodeType = extractKeywordValue(rest, "TYPE");
+        if (nodeType != null) nodeType = nodeType.split("\\s+")[0];
+        q.setNodeType(nodeType);
         parseProperties(q, extractKeywordValue(rest, "PROPERTIES"));
         return q;
     }
@@ -277,7 +313,9 @@ public class QueryParser {
     // DELETE NODE u1
     private Query parseDeleteNode(String input) {
         Query q = new Query(Query.Type.DELETE_NODE);
-        q.setNodeId(stripPrefix(input, "DELETE NODE").trim());
+        String id = stripPrefix(input, "DELETE NODE").trim();
+        if (id.isEmpty()) return new Query(Query.Type.UNKNOWN);
+        q.setNodeId(id);
         return q;
     }
 
@@ -285,9 +323,10 @@ public class QueryParser {
     private Query parseUpdateNode(String input) {
         Query q = new Query(Query.Type.UPDATE_NODE);
         String rest = stripPrefix(input, "UPDATE NODE").trim();
+        if (rest.isEmpty()) return new Query(Query.Type.UNKNOWN);
         q.setNodeId(firstToken(rest));
         String setExpr = extractKeywordValue(rest, "SET");
-        if (setExpr != null) {
+        if (setExpr != null && !setExpr.isEmpty()) {
             String[] parts = setExpr.split("=", 2);
             if (parts.length == 2) {
                 q.setConditionKey(parts[0].trim());
@@ -305,11 +344,14 @@ public class QueryParser {
     private Query parseAddEdge(String input) {
         Query q = new Query(Query.Type.ADD_EDGE);
         String rest = stripPrefix(input, "ADD EDGE").trim();
+        if (rest.isEmpty()) return new Query(Query.Type.UNKNOWN);
         q.setEdgeSourceId(firstToken(rest));
         q.setEdgeDestId(extractKeywordValue(rest, "TO"));
         String toVal = q.getEdgeDestId();
-        if (toVal != null) q.setEdgeDestId(toVal.split("\\s+")[0]);
-        q.setRelationshipType(extractKeywordValue(rest, "TYPE"));
+        if (toVal != null && !toVal.isEmpty()) q.setEdgeDestId(toVal.split("\\s+")[0]);
+        String relType = extractKeywordValue(rest, "TYPE");
+        if (relType != null && !relType.isEmpty()) relType = relType.split("\\s+")[0];
+        q.setRelationshipType(relType);
         parseProperties(q, extractKeywordValue(rest, "PROPERTIES"));
         return q;
     }
@@ -349,6 +391,9 @@ public class QueryParser {
     // ─────────────────────────────────────────────
 
     // FIND User WHERE age=25
+    // FIND User WHERE age > 25
+    // FIND User WHERE age > 25 AND name = Alice
+    // FIND User WHERE age > 25 OR name = Bob
     // FIND User
     private Query parseFind(String input) {
         Query q = new Query(Query.Type.FIND);
@@ -358,16 +403,116 @@ public class QueryParser {
         if (upper.contains("WHERE")) {
             typePart = rest.substring(0, upper.indexOf("WHERE")).trim();
             String whereExpr = rest.substring(upper.indexOf("WHERE") + 5).trim();
-            String[] parts = whereExpr.split("=", 2);
-            if (parts.length == 2) {
-                q.setConditionKey(parts[0].trim());
-                q.setConditionValue(parts[1].trim());
-            }
+            parseWhereClause(q, whereExpr);
         } else {
             typePart = rest.trim();
         }
         q.setNodeType(typePart);
         return q;
+    }
+
+    /**
+     * Parses a WHERE clause that may contain:
+     *   - Single condition:   age = 25, age > 25, age != 30
+     *   - Compound AND:       age > 25 AND name = Alice
+     *   - Compound OR:        age > 25 OR name = Bob
+     */
+    private void parseWhereClause(Query q, String whereExpr) {
+        String upper = whereExpr.toUpperCase();
+
+        // Check for AND / OR
+        int andIdx = findLogicOperator(upper, " AND ");
+        int orIdx  = findLogicOperator(upper, " OR ");
+
+        if (andIdx > 0 || orIdx > 0) {
+            // Compound condition
+            boolean isAnd = (andIdx > 0 && (orIdx < 0 || andIdx < orIdx));
+            String logic = isAnd ? "AND" : "OR";
+            String splitter = isAnd ? " AND " : " OR ";
+            int splitIdx = isAnd ? andIdx : orIdx;
+
+            q.setConditionLogic(logic);
+
+            // Split and parse each part
+            String[] parts = splitCompound(whereExpr, upper, splitter);
+            for (String part : parts) {
+                Query.Condition cond = parseSingleCondition(part.trim());
+                if (cond != null) {
+                    q.addCondition(cond.key, cond.operator, cond.value);
+                }
+            }
+
+            // Also set the first condition in the legacy fields for backward compat
+            if (q.getConditions() != null && !q.getConditions().isEmpty()) {
+                Query.Condition first = q.getConditions().get(0);
+                q.setConditionKey(first.key);
+                q.setConditionOp(first.operator);
+                q.setConditionValue(first.value);
+            }
+        } else {
+            // Single condition
+            Query.Condition cond = parseSingleCondition(whereExpr);
+            if (cond != null) {
+                q.setConditionKey(cond.key);
+                q.setConditionOp(cond.operator);
+                q.setConditionValue(cond.value);
+            }
+        }
+    }
+
+    /**
+     * Parses a single condition like "age > 25" or "name=Alice" into key, operator, value.
+     * Supports: =, !=, <=, >=, <, >
+     */
+    private Query.Condition parseSingleCondition(String expr) {
+        if (expr == null || expr.trim().isEmpty()) return null;
+        expr = expr.trim();
+
+        // Try two-char operators first: !=, <=, >=
+        String[] twoCharOps = {"!=", "<=", ">="};
+        for (String op : twoCharOps) {
+            int idx = expr.indexOf(op);
+            if (idx > 0) {
+                String key = expr.substring(0, idx).trim();
+                String val = expr.substring(idx + 2).trim();
+                if (!key.isEmpty() && !val.isEmpty()) {
+                    return new Query.Condition(key, op, val);
+                }
+            }
+        }
+
+        // Single-char operators: <, >, =
+        String[] oneCharOps = {"<", ">", "="};
+        for (String op : oneCharOps) {
+            int idx = expr.indexOf(op);
+            if (idx > 0) {
+                String key = expr.substring(0, idx).trim();
+                String val = expr.substring(idx + 1).trim();
+                if (!key.isEmpty() && !val.isEmpty()) {
+                    return new Query.Condition(key, op, val);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private int findLogicOperator(String upper, String op) {
+        return upper.indexOf(op);
+    }
+
+    private String[] splitCompound(String original, String upper, String splitter) {
+        // Split preserving original case
+        java.util.List<String> parts = new java.util.ArrayList<>();
+        int start = 0;
+        int idx;
+        String upperSplitter = splitter.toUpperCase();
+        while ((idx = upper.indexOf(upperSplitter, start)) >= 0) {
+            parts.add(original.substring(start, idx));
+            start = idx + splitter.length();
+        }
+        parts.add(original.substring(start));
+        return parts.toArray(new String[0]);
     }
 
     // NEIGHBORS u1
@@ -470,7 +615,7 @@ public class QueryParser {
     private String trimAtNextKeyword(String input) {
         String[] keywords = {
             " TYPE ", " FROM ", " TO ", " WHERE ", " PROPERTIES ",
-            " REQUIRED ", " OPTIONAL ", " SET "
+            " REQUIRED ", " OPTIONAL ", " SET ", " WEIGHT "
         };
         String upper = " " + input.toUpperCase() + " ";
         int cutAt = input.length();
@@ -531,6 +676,104 @@ public class QueryParser {
             q.setSecondNodeId(toVal.split("\\s+")[0]);
         }
         q.setRelationshipType(extractKeywordValue(rest, "TYPE"));
+        return q;
+    }
+
+    // WEIGHTED SHORTEST PATH u1 TO u2 WEIGHT distance [TYPE ROADS]
+    private Query parseWeightedShortestPath(String input) {
+        Query q = new Query(Query.Type.WEIGHTED_SHORTEST_PATH);
+        String rest = stripPrefix(input, "WEIGHTED SHORTEST PATH").trim();
+        if (rest.isEmpty()) return new Query(Query.Type.UNKNOWN);
+        q.setNodeId(firstToken(rest));
+        String toVal = extractKeywordValue(rest, "TO");
+        if (toVal != null) {
+            q.setSecondNodeId(toVal.split("\\s+")[0]);
+        }
+        // WEIGHT property key used for edge weight
+        String weightProp = extractKeywordValue(rest, "WEIGHT");
+        if (weightProp != null) {
+            q.setConditionKey(weightProp.split("\\s+")[0]);
+        }
+        q.setRelationshipType(extractKeywordValue(rest, "TYPE"));
+        return q;
+    }
+
+    // ALTER NODE TYPE User ADD REQUIRED email
+    // ALTER NODE TYPE User ADD OPTIONAL phone
+    // ALTER NODE TYPE User REMOVE email
+    // ALTER RELATIONSHIP TYPE FRIENDS ADD OPTIONAL weight
+    private Query parseAlterType(String input, boolean isNode) {
+        Query.Type qtype = isNode ? Query.Type.ALTER_NODE_TYPE : Query.Type.ALTER_RELATIONSHIP_TYPE;
+        Query q = new Query(qtype);
+        String prefix = isNode ? "ALTER NODE TYPE" : "ALTER RELATIONSHIP TYPE";
+        String rest = stripPrefix(input, prefix).trim();
+        if (rest.isEmpty()) return new Query(Query.Type.UNKNOWN);
+
+        // First token is the type name
+        String typeName = firstToken(rest);
+        if (isNode) {
+            q.setNodeType(typeName);
+        } else {
+            q.setRelationshipType(typeName);
+        }
+
+        String upper = rest.toUpperCase();
+        // Look for ADD REQUIRED, ADD OPTIONAL, REMOVE
+        if (upper.contains("ADD REQUIRED")) {
+            String val = extractKeywordValueAfter(rest, "ADD REQUIRED");
+            q.setRequiredProps(val);
+            q.setConditionOp("ADD_REQUIRED");
+        } else if (upper.contains("ADD OPTIONAL")) {
+            String val = extractKeywordValueAfter(rest, "ADD OPTIONAL");
+            q.setOptionalProps(val);
+            q.setConditionOp("ADD_OPTIONAL");
+        } else if (upper.contains("REMOVE")) {
+            String val = extractKeywordValueAfter(rest, "REMOVE");
+            q.setConditionKey(val);
+            q.setConditionOp("REMOVE");
+        }
+        return q;
+    }
+
+    private String extractKeywordValueAfter(String input, String keyword) {
+        String upper = input.toUpperCase();
+        String kwUpper = keyword.toUpperCase();
+        int idx = upper.indexOf(kwUpper);
+        if (idx < 0) return null;
+        String after = input.substring(idx + keyword.length()).trim();
+        return after.isEmpty() ? null : after.split("\\s+")[0];
+    }
+
+    // REMOVE PROPERTY <typeName> <property>   (schema removal)
+    // REMOVE PROPERTY <key> FROM <nodeId>      (node instance removal)
+    private Query parseRemoveProperty(String input) {
+        Query q = new Query(Query.Type.REMOVE_PROPERTY);
+        String rest = stripPrefix(input, "REMOVE PROPERTY").trim();
+        if (rest.isEmpty()) return new Query(Query.Type.UNKNOWN);
+
+        // Check for FROM keyword → node-instance removal
+        String fromVal = extractKeywordValue(rest, "FROM");
+        if (fromVal != null) {
+            q.setConditionKey(firstToken(rest));
+            q.setNodeId(fromVal.split("\\s+")[0]);
+        } else {
+            // Schema removal: REMOVE PROPERTY <typeName> <property>
+            String[] parts = rest.split("\\s+", 2);
+            if (parts.length < 2) return new Query(Query.Type.UNKNOWN);
+            q.setNodeType(parts[0]);           // type name
+            q.setConditionKey(parts[1].trim()); // property name
+        }
+        return q;
+    }
+
+    // EXPLAIN FIND User WHERE age > 25
+    private Query parseExplain(String input) {
+        Query q = new Query(Query.Type.EXPLAIN);
+        String rest = stripPrefix(input, "EXPLAIN").trim();
+        // Store the inner query text in filePath (repurposed field)
+        if (!rest.isEmpty()) {
+            q.setFilePath(rest);
+        }
         return q;
     }
 }

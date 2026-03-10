@@ -74,14 +74,10 @@ public class NodeManager {
     }
 
     /**
-     * Returns all nodes of a specific type.
+     * Returns all nodes of a specific type. Uses storage type index for O(k) lookup.
      */
     public List<Node> getNodesByType(String type) {
-        List<Node> result = new ArrayList<>();
-        for (Node n : storage.getAllNodes()) {
-            if (n.getType().equals(type)) result.add(n);
-        }
-        return result;
+        return new ArrayList<>(storage.getNodesByType(type));
     }
 
     /**

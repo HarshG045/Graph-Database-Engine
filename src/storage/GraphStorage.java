@@ -5,9 +5,12 @@ import model.Node;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Graph Storage Layer
@@ -30,10 +33,14 @@ public class GraphStorage {
     // Incoming edges: nodeId → list of edges arriving at this node
     private final Map<String, List<Edge>> reverseAdjacencyList;
 
+    // Type index: typeName → set of nodeIds of that type (O(1) type lookup)
+    private final Map<String, Set<String>> typeIndex;
+
     public GraphStorage() {
         this.nodes = new HashMap<>();
         this.adjacencyList = new HashMap<>();
         this.reverseAdjacencyList = new HashMap<>();
+        this.typeIndex = new HashMap<>();
     }
 
     // ─────────────────────────────────────────────
@@ -48,6 +55,7 @@ public class GraphStorage {
         nodes.put(node.getId(), node);
         adjacencyList.putIfAbsent(node.getId(), new ArrayList<>());
         reverseAdjacencyList.putIfAbsent(node.getId(), new ArrayList<>());
+        typeIndex.computeIfAbsent(node.getType(), k -> new HashSet<>()).add(node.getId());
     }
 
     /**
@@ -56,7 +64,15 @@ public class GraphStorage {
      * @return true if the node existed and was removed
      */
     public boolean removeNode(String nodeId) {
-        if (!nodes.containsKey(nodeId)) return false;
+        Node node = nodes.get(nodeId);
+        if (node == null) return false;
+
+        // Remove from type index
+        Set<String> typeSet = typeIndex.get(node.getType());
+        if (typeSet != null) {
+            typeSet.remove(nodeId);
+            if (typeSet.isEmpty()) typeIndex.remove(node.getType());
+        }
 
         // Remove all outgoing edges
         List<Edge> outgoing = adjacencyList.getOrDefault(nodeId, new ArrayList<>());
@@ -87,6 +103,20 @@ public class GraphStorage {
 
     public Collection<Node> getAllNodes() {
         return nodes.values();
+    }
+
+    /**
+     * Returns all nodes of a specific type using the type index. O(k) where k = result size.
+     */
+    public List<Node> getNodesByType(String typeName) {
+        Set<String> ids = typeIndex.get(typeName);
+        if (ids == null || ids.isEmpty()) return new ArrayList<>();
+        List<Node> result = new ArrayList<>(ids.size());
+        for (String id : ids) {
+            Node n = nodes.get(id);
+            if (n != null) result.add(n);
+        }
+        return result;
     }
 
     public int getNodeCount() {
@@ -212,6 +242,7 @@ public class GraphStorage {
         nodes.clear();
         adjacencyList.clear();
         reverseAdjacencyList.clear();
+        typeIndex.clear();
     }
 
     /**

@@ -98,10 +98,12 @@ public class ConsoleReader {
 
     /**
      * Re-prompts the user, showing a pre-filled value they can extend or replace.
+     * Uses iterative approach to avoid stack overflow from deep autocomplete chains.
      */
     private String readLineWithPrefill(String prompt, String prefill) {
+        String currentPrefill = prefill;
         while (true) {
-            System.out.print(prompt + prefill);
+            System.out.print(prompt + currentPrefill);
             System.out.flush();
 
             if (!scanner.hasNextLine()) {
@@ -111,7 +113,7 @@ public class ConsoleReader {
             String extra = scanner.nextLine();
 
             // Check if user wants more suggestions on the extended input
-            String fullLine = prefill + extra;
+            String fullLine = currentPrefill + extra;
 
             boolean wantsSuggestions = false;
             String partial = fullLine;
@@ -133,14 +135,16 @@ public class ConsoleReader {
             if (suggestions.isEmpty()) {
                 System.out.println("  (no suggestions)");
                 System.out.println();
-                return readLineWithPrefill(prompt, partial + " ");
+                currentPrefill = partial + " ";
+                continue;
             }
 
             if (suggestions.size() == 1) {
                 String completed = buildCompletion(partial, suggestions.get(0));
                 System.out.println("  >> " + completed);
                 System.out.println();
-                return readLineWithPrefill(prompt, completed);
+                currentPrefill = completed;
+                continue;
             }
 
             System.out.println();
@@ -149,7 +153,7 @@ public class ConsoleReader {
 
             String common = longestCommonPrefix(suggestions);
             String filled = buildCompletion(partial, common);
-            return readLineWithPrefill(prompt, filled);
+            currentPrefill = filled;
         }
     }
 

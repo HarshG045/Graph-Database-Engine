@@ -31,11 +31,18 @@ A fully in-memory, schema-enforced graph database engine built in Java with a cu
 
 - **Schema-first design** — define node types and relationship types with required and optional properties before inserting data
 - **Constraint enforcement** — unique node IDs, required property validation, type compatibility checks on edges, referential integrity on schema DROP
-- **Graph traversal** — BFS, DFS, and unweighted shortest-path with optional relationship-type filters
-- **Property index** — O(1) average lookup for `WHERE` property queries
+- **Schema evolution** — `ALTER TYPE` to add properties, `REMOVE PROPERTY` to drop them
+- **Graph traversal** — BFS, DFS, unweighted shortest-path, and **Dijkstra weighted shortest-path** with optional relationship-type filters
+- **Property index** — O(1) average lookup for `WHERE` property queries; O(k) type index for fast node-type lookups
+- **Range queries** — `WHERE age > 25`, `WHERE price <= 100` with operators `=`, `!=`, `<`, `<=`, `>`, `>=`
+- **Compound conditions** — `WHERE age > 25 AND city = NYC` or `WHERE role = Eng OR role = Mgr`
+- **Property data types** — automatic type detection (integer, float, boolean, string) for correct numeric/lexicographic comparisons
+- **Import CSV** — bulk-load nodes and edges from CSV files
+- **EXPLAIN** — display the query execution plan before running a command
+- **Validated LOAD** — post-load validation reports missing types, required properties, and dangling references
 - **Rich query language** — custom command syntax parsed via `QueryParser` into `Query` objects executed by `QueryExecutor`
-- **File persistence** — save and load the full graph state (schema + nodes + edges) to a `.gdb` text file
-- **Interactive REPL** — live `GDB> ` prompt with `HELP`, `DEMO`, and `EXIT` built in
+- **File persistence** — save and load the full graph state (schema + nodes + edges) to a `.gdb` text file with path sandboxing
+- **Interactive REPL** — live `GDB> ` prompt with `HELP`, `DEMO`, tab-autocomplete, and `EXIT` built in
 
 ---
 
@@ -85,6 +92,7 @@ A fully in-memory, schema-enforced graph database engine built in Java with a cu
 | `Edge` | `model` | Directed edge with src, dst, relationship type, properties |
 | `NodeType` | `model` | Schema metadata for node types |
 | `RelationshipType` | `model` | Schema metadata for edge types (src type, dst type, required/optional props) |
+| `PropertyValue` | `model` | Type-aware property value comparison (int, float, boolean, string) |
 | `SchemaManager` | `schema` | Catalog of node types and relationship types |
 | `GraphStorage` | `storage` | In-memory store: HashMap for nodes, adjacency list for edges |
 | `StorageManager` | `storage` | File serialisation/deserialisation of graph state |
@@ -93,9 +101,11 @@ A fully in-memory, schema-enforced graph database engine built in Java with a cu
 | `NodeManager` | `engine` | Node CRUD + index maintenance |
 | `EdgeManager` | `engine` | Edge CRUD with constraint checking |
 | `GraphEngine` | `engine` | Facade wiring all subsystems; safe DROP and CLEAR operations |
-| `TraversalEngine` | `traversal` | BFS, DFS, Shortest Path algorithms |
+| `TraversalEngine` | `traversal` | BFS, DFS, Shortest Path, Dijkstra Weighted Shortest Path |
 | `QueryParser` | `query` | Parses command strings into `Query` objects |
 | `QueryExecutor` | `query` | Executes `Query` objects against `GraphEngine` |
+| `QueryAutoComplete` | `query` | Context-aware tab-completion suggestions |
+| `ConsoleReader` | (default) | Line reader with autocomplete support |
 | `Main` | (default) | Entry point; REPL loop |
 
 ---
@@ -106,11 +116,13 @@ A fully in-memory, schema-enforced graph database engine built in Java with a cu
 Graph Database Engine/
 ├── src/
 │   ├── Main.java
+│   ├── ConsoleReader.java
 │   ├── model/
 │   │   ├── Node.java
 │   │   ├── Edge.java
 │   │   ├── NodeType.java
-│   │   └── RelationshipType.java
+│   │   ├── RelationshipType.java
+│   │   └── PropertyValue.java
 │   ├── schema/
 │   │   └── SchemaManager.java
 │   ├── storage/
@@ -129,7 +141,8 @@ Graph Database Engine/
 │   └── query/
 │       ├── Query.java
 │       ├── QueryParser.java
-│       └── QueryExecutor.java
+│       ├── QueryExecutor.java
+│       └── QueryAutoComplete.java
 ├── out/               (compiled .class files — created by build)
 ├── compile.bat        (Windows compile script)
 ├── run.bat            (Windows compile-and-run script)
@@ -256,6 +269,29 @@ Removes the relationship type from the schema. **Blocked if any edges of this ty
 GDB> DROP RELATIONSHIP TYPE OLD_LINK
 ```
 
+#### ALTER NODE TYPE / ALTER RELATIONSHIP TYPE
+```
+ALTER NODE TYPE <name> ADD REQUIRED|OPTIONAL <property>
+ALTER RELATIONSHIP TYPE <name> ADD REQUIRED|OPTIONAL <property>
+```
+Adds a new required or optional property to an existing type definition.
+
+```
+GDB> ALTER NODE TYPE User ADD OPTIONAL phone
+GDB> ALTER RELATIONSHIP TYPE FRIENDS ADD OPTIONAL strength
+```
+
+#### REMOVE PROPERTY
+```
+REMOVE PROPERTY <typeName> <propertyName>
+```
+Removes a property from a node type or relationship type schema. **Blocked if the property is required and nodes/edges still depend on it.**
+
+```
+GDB> REMOVE PROPERTY User phone
+GDB> REMOVE PROPERTY FRIENDS strength
+```
+
 #### SHOW SCHEMA
 ```
 SHOW SCHEMA
@@ -341,14 +377,26 @@ GDB> UPDATE EDGE u1 TO u2 TYPE FRIENDS SET since=2019
 
 #### FIND
 ```
-FIND <nodeType> [WHERE <key>=<value>]
+FIND <nodeType> [WHERE <key> <operator> <value>]
 ```
-Returns all nodes of the given type, optionally filtered by a property value. Uses the property index for efficient lookup when `WHERE` is specified.
+Returns all nodes of the given type, optionally filtered by property conditions.
+
+**Operators:** `=`, `!=`, `<`, `<=`, `>`, `>=`
+
+Uses the property index for O(1) exact-match lookups. Range operators trigger a filtered scan with type-aware comparison (integers and floats are compared numerically).
 
 ```
 GDB> FIND User
 GDB> FIND User WHERE age=25
-GDB> FIND Company WHERE industry=Software
+GDB> FIND User WHERE age > 25
+GDB> FIND User WHERE age <= 30
+GDB> FIND Company WHERE name != TechCorp
+```
+
+**Compound conditions** — combine two conditions with `AND` or `OR`:
+```
+GDB> FIND User WHERE age >= 28 AND age <= 35
+GDB> FIND User WHERE name = Alice OR name = Dave
 ```
 
 #### NEIGHBORS
@@ -412,6 +460,17 @@ GDB> SHORTEST PATH u1 TO u4 TYPE FRIENDS
 
 If no path exists, the engine reports accordingly.
 
+#### WEIGHTED SHORTEST PATH
+```
+WEIGHTED SHORTEST PATH <startId> TO <endId> WEIGHT <property> [TYPE <relType>]
+```
+Finds the shortest weighted path using **Dijkstra's algorithm**. The specified edge property is used as the weight (non-numeric or missing properties default to 1.0).
+
+```
+GDB> WEIGHTED SHORTEST PATH u1 TO u4 WEIGHT distance
+GDB> WEIGHTED SHORTEST PATH u1 TO u4 WEIGHT since TYPE FRIENDS
+```
+
 ---
 
 ### Aggregation and Counting
@@ -446,30 +505,64 @@ GDB> COUNT EDGES TYPE FRIENDS
 
 ---
 
-### Persistence
+### Import / Export / Persistence
 
 #### SAVE
 ```
 SAVE [<filepath>]
 ```
-Serialises the full graph state (schema + nodes + edges) to a file. Default filename: `graph_data.gdb`. Parent directories are created automatically.
+Serialises the full graph state (schema + nodes + edges) to a file. Default filename: `graph_data.gdb`. Parent directories are created automatically. Path sandboxing blocks absolute paths and `..` traversal.
 
 ```
 GDB> SAVE
 GDB> SAVE my_graph.gdb
-GDB> SAVE backups\snapshot.gdb
 ```
 
 #### LOAD
 ```
 LOAD [<filepath>]
 ```
-Deserialises graph state from file, replacing all current data. Default filename: `graph_data.gdb`.
+Deserialises graph state from file, replacing all current data. Default filename: `graph_data.gdb`. After loading, the engine **validates all data** against the loaded schema and reports any warnings (missing required properties, unknown types, dangling edge references).
 
 ```
 GDB> LOAD
 GDB> LOAD my_graph.gdb
 ```
+
+#### IMPORT CSV
+```
+IMPORT CSV <filepath>
+```
+Bulk-loads nodes and edges from a CSV file. The file must contain `# NODES` and `# EDGES` section headers.
+
+CSV format:
+```csv
+# NODES
+id,type,name,age,email
+u5,User,Eve,29,eve@example.com
+u6,User,Frank,32,
+
+# EDGES
+source,destination,type,since
+u5,u6,FRIENDS,2023
+```
+The first row under each header is treated as the column header. Node types and relationship types must already exist in the schema.
+
+```
+GDB> IMPORT CSV people.csv
+```
+
+#### EXPORT DOT
+```
+EXPORT DOT [<filepath>]
+```
+Exports the graph in Graphviz DOT format. Prints to console if no file is given.
+
+#### EXPORT CSV
+```
+EXPORT CSV [<filepath>]
+```
+Exports nodes and edges in CSV format. Prints to console if no file is given.
 
 ---
 
@@ -498,6 +591,18 @@ Removes all nodes and edges but **preserves the schema** (type definitions remai
 CLEAR ALL
 ```
 Removes everything: schema, nodes, edges, and the index. Returns the engine to a blank state.
+
+#### EXPLAIN
+```
+EXPLAIN <command>
+```
+Displays the query execution plan for a command **without executing it**. Shows the command type, filter strategy, index usage, and estimated complexity.
+
+```
+GDB> EXPLAIN FIND User WHERE age > 25
+GDB> EXPLAIN FIND User WHERE name = Alice
+GDB> EXPLAIN SHORTEST PATH u1 TO u4
+```
 
 #### HELP
 ```
@@ -543,13 +648,19 @@ GDB> ADD EDGE u1 TO c1 TYPE WORKS_AT PROPERTIES role=Engineer
 GDB> ADD EDGE u2 TO c1 TYPE WORKS_AT PROPERTIES role=Manager
 
 GDB> FIND User WHERE age=25
+GDB> FIND User WHERE age > 25
+GDB> FIND User WHERE age >= 28 AND age <= 35
 GDB> NEIGHBORS u1
 GDB> BFS u1 TYPE FRIENDS
 GDB> SHORTEST PATH u1 TO u4 TYPE FRIENDS
+GDB> WEIGHTED SHORTEST PATH u1 TO u4 WEIGHT since TYPE FRIENDS
 GDB> DESCRIBE u1
 
 GDB> COUNT NODES TYPE User
 GDB> COUNT EDGES TYPE FRIENDS
+
+GDB> ALTER NODE TYPE User ADD OPTIONAL phone
+GDB> EXPLAIN FIND User WHERE age > 25
 
 GDB> SAVE social_network.gdb
 ```
@@ -562,6 +673,7 @@ GDB> SHOW SCHEMA
 GDB> SHOW GRAPH
 GDB> UPDATE NODE u2 SET age=26
 GDB> FIND User WHERE age=26
+GDB> REMOVE PROPERTY User phone
 ```
 
 ### Schema Drop with Referential Integrity
@@ -605,11 +717,12 @@ u1|c1|WORKS_AT|role=Engineer
 - Fields within a record are separated by `|`
 - Properties are separated by `;`; key-value pairs use `=`
 - Special characters in values are escaped with `~`:
+  - `~t` → `~` (tilde)
   - `~b` → `\` (backslash)
   - `~p` → `|` (pipe)
   - `~s` → `;` (semicolon)
   - `~e` → `=` (equals)
-- **The tilde character `~` cannot appear in property values**
+- Tildes are safely round-tripped (`~` → `~t` on save, `~t` → `~` on load)
 
 ---
 
@@ -627,7 +740,17 @@ u1|c1|WORKS_AT|role=Engineer
 
 6. **BFS for shortest path** — the graph is unweighted; BFS guarantees the minimum hop-count path. A parent map tracks each node's predecessor for path reconstruction.
 
-7. **Sentinel strings in COUNT queries** — the `nodeType` field carries `"NODES"`, `"EDGES"`, or `"ALL"` as sentinels, and `relType` carries the optional type filter, avoiding COUNT-specific fields in the `Query` model.
+7. **Dijkstra for weighted shortest path** — when edge properties carry numeric weights, Dijkstra's algorithm with a priority queue finds the minimum-cost path. Missing or non-numeric weights default to 1.0.
+
+8. **Type index for O(k) lookups** — `GraphStorage` maintains a secondary `Map<String, Set<String>>` mapping type names to node IDs. `FIND <type>` leverages this index instead of scanning all nodes.
+
+9. **PropertyValue type detection** — property values are auto-detected as integer, float, boolean, or string. Range comparisons (`<`, `>`, etc.) use numeric ordering for numbers and lexicographic ordering for strings.
+
+10. **Post-load validation** — after `LOAD`, the `ConstraintValidator` scans all nodes and edges against the schema and reports warnings for missing required properties, unknown types, or dangling edge references.
+
+11. **Path sandboxing** — `SAVE`, `LOAD`, `IMPORT CSV`, `EXPORT DOT`, and `EXPORT CSV` all validate paths to block `..` traversal, absolute paths, and unsafe file extensions.
+
+12. **Sentinel strings in COUNT queries** — the `nodeType` field carries `"NODES"`, `"EDGES"`, or `"ALL"` as sentinels, and `relType` carries the optional type filter, avoiding COUNT-specific fields in the `Query` model.
 
 ---
 
@@ -635,8 +758,7 @@ u1|c1|WORKS_AT|role=Engineer
 
 - **In-memory only** — the entire graph is held in RAM; very large graphs are constrained by available heap.
 - **No transactions** — there is no rollback mechanism; a failed command sequence may leave partial state.
-- **Single-property WHERE** — `FIND` supports only one `WHERE key=value` filter per query.
-- **Unweighted shortest path** — `SHORTEST PATH` uses BFS (hop count). Edge weights stored as properties are not used by the algorithm.
-- **Tilde reserved in values** — the `~` character is the escape prefix in `.gdb` files and cannot appear in property values.
+- **Two-condition limit** — compound `WHERE` supports at most two conditions joined by `AND` or `OR`.
 - **Single-threaded** — there is no locking or thread-safety; the engine is designed for single-user interactive use.
 - **Case-sensitive values** — node IDs, type names, and property values are case-sensitive; query keywords are case-insensitive.
+- **CSV import requires schema** — node types and relationship types must already be defined before `IMPORT CSV`.

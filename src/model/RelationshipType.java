@@ -1,6 +1,7 @@
 package model;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -42,11 +43,11 @@ public class RelationshipType {
     }
 
     public List<String> getRequiredProperties() {
-        return requiredProperties;
+        return Collections.unmodifiableList(requiredProperties);
     }
 
     public List<String> getOptionalProperties() {
-        return optionalProperties;
+        return Collections.unmodifiableList(optionalProperties);
     }
 
     public void addRequiredProperty(String propertyKey) {
@@ -63,6 +64,14 @@ public class RelationshipType {
 
     public boolean isRequiredProperty(String key) {
         return requiredProperties.contains(key);
+    }
+
+    /**
+     * Removes a property from both required and optional lists.
+     */
+    public void removeProperty(String key) {
+        requiredProperties.remove(key);
+        optionalProperties.remove(key);
     }
 
     /**

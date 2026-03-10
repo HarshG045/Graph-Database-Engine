@@ -7,6 +7,7 @@ import model.RelationshipType;
 import schema.SchemaManager;
 import storage.GraphStorage;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -145,6 +146,66 @@ public class ConstraintValidator {
                         + "' for relationship type '" + relType + "'.");
             }
         }
+    }
+
+    // ─────────────────────────────────────────────
+    //  Post-Load Validation
+    // ─────────────────────────────────────────────
+
+    /**
+     * Validates all nodes and edges currently in storage against the schema.
+     * Returns a list of warning/error messages (empty if everything is valid).
+     */
+    public List<String> validateLoadedData() {
+        List<String> warnings = new ArrayList<>();
+
+        // Validate each node
+        for (Node node : graphStorage.getAllNodes()) {
+            if (!schemaManager.nodeTypeExists(node.getType())) {
+                warnings.add("[VALIDATE] Node '" + node.getId()
+                        + "': unknown type '" + node.getType() + "'.");
+                continue;
+            }
+            NodeType nt = schemaManager.getNodeType(node.getType());
+            for (String req : nt.getRequiredProperties()) {
+                if (!node.hasProperty(req)) {
+                    warnings.add("[VALIDATE] Node '" + node.getId()
+                            + "': missing required property '" + req + "'.");
+                }
+            }
+        }
+
+        // Validate each edge
+        for (Edge edge : graphStorage.getAllEdges()) {
+            if (!graphStorage.nodeExists(edge.getSourceId())) {
+                warnings.add("[VALIDATE] Edge (" + edge.getSourceId()
+                        + " -> " + edge.getDestinationId()
+                        + "): source node does not exist.");
+            }
+            if (!graphStorage.nodeExists(edge.getDestinationId())) {
+                warnings.add("[VALIDATE] Edge (" + edge.getSourceId()
+                        + " -> " + edge.getDestinationId()
+                        + "): destination node does not exist.");
+            }
+            if (!schemaManager.relationshipTypeExists(edge.getRelationshipType())) {
+                warnings.add("[VALIDATE] Edge (" + edge.getSourceId()
+                        + " -[" + edge.getRelationshipType() + "]-> "
+                        + edge.getDestinationId()
+                        + "): unknown relationship type.");
+                continue;
+            }
+            RelationshipType rt = schemaManager.getRelationshipType(edge.getRelationshipType());
+            for (String req : rt.getRequiredProperties()) {
+                if (!edge.hasProperty(req)) {
+                    warnings.add("[VALIDATE] Edge (" + edge.getSourceId()
+                            + " -[" + edge.getRelationshipType() + "]-> "
+                            + edge.getDestinationId()
+                            + "): missing required property '" + req + "'.");
+                }
+            }
+        }
+
+        return warnings;
     }
 
     // ─────────────────────────────────────────────

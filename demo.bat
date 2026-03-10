@@ -21,4 +21,4 @@ if not exist demo_script.txt (
 
 echo.
 REM Strip REM comments and blank lines, then pipe into the engine
-findstr /v /i /b "REM " demo_script.txt | findstr /r /v "^$" | java -cp out Main
+findstr /v /r /c:"^REM " demo_script.txt | findstr /r /v "^$" | java -cp out Main

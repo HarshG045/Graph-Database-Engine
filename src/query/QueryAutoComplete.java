@@ -18,12 +18,12 @@ public class QueryAutoComplete {
     private final GraphEngine engine;
 
     private static final String[] TOP_LEVEL = {
-        "CREATE", "DROP", "ADD", "DELETE", "UPDATE",
+        "CREATE", "DROP", "ALTER", "ADD", "DELETE", "UPDATE",
         "FIND", "NEIGHBORS", "DESCRIBE",
-        "BFS", "DFS", "SHORTEST",
+        "BFS", "DFS", "SHORTEST", "WEIGHTED",
         "DEGREE", "STATS", "COMPONENTS",
-        "HAS", "PATH", "EXPORT", "HISTORY",
-        "SAVE", "LOAD",
+        "HAS", "PATH", "EXPORT", "IMPORT", "HISTORY",
+        "SAVE", "LOAD", "REMOVE", "EXPLAIN",
         "SHOW", "COUNT", "CLEAR",
         "DEMO", "HELP", "EXIT", "QUIT"
     };
@@ -74,6 +74,11 @@ public class QueryAutoComplete {
             case "HAS":     return suggestHas(complete, partial);
             case "PATH":    return suggestPathExists(tokens, complete, partial);
             case "EXPORT":  return suggestExport(tokens, complete, partial);
+            case "ALTER":   return suggestAlter(tokens, complete, partial);
+            case "IMPORT":  return suggestImport(complete, partial);
+            case "WEIGHTED":return suggestWeighted(complete, partial);
+            case "REMOVE":  return suggestRemove(tokens, complete, partial);
+            case "EXPLAIN": return Collections.emptyList(); // user types any command
             default:         return Collections.emptyList();
         }
     }
@@ -336,6 +341,63 @@ public class QueryAutoComplete {
 
     private List<String> suggestExport(String[] tokens, int complete, String partial) {
         if (complete == 1) return filterPrefix(asList("DOT", "CSV"), partial);
+        return Collections.emptyList();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  ALTER NODE TYPE <name> ADD REQUIRED|OPTIONAL <prop>
+    //  ALTER RELATIONSHIP TYPE <name> ADD REQUIRED|OPTIONAL <prop>
+    // ═══════════════════════════════════════════════════════════════
+
+    private List<String> suggestAlter(String[] tokens, int complete, String partial) {
+        if (complete == 1) return filterPrefix(asList("NODE", "RELATIONSHIP"), partial);
+        if (complete == 2) return filterPrefix(asList("TYPE"), partial);
+        if (complete == 3) {
+            String kind = tokens[1].toUpperCase();
+            if (kind.equals("NODE")) return filterPrefix(getNodeTypeNames(), partial);
+            if (kind.equals("RELATIONSHIP")) return filterPrefix(getRelTypeNames(), partial);
+        }
+        if (complete == 4) return filterPrefix(asList("ADD"), partial);
+        if (complete == 5) return filterPrefix(asList("REQUIRED", "OPTIONAL"), partial);
+        return Collections.emptyList();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  IMPORT CSV <filepath>
+    // ═══════════════════════════════════════════════════════════════
+
+    private List<String> suggestImport(int complete, String partial) {
+        if (complete == 1) return filterPrefix(asList("CSV"), partial);
+        return Collections.emptyList();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  WEIGHTED SHORTEST PATH <s> TO <e> WEIGHT <prop> [TYPE <rel>]
+    // ═══════════════════════════════════════════════════════════════
+
+    private List<String> suggestWeighted(int complete, String partial) {
+        if (complete == 1) return filterPrefix(asList("SHORTEST"), partial);
+        if (complete == 2) return filterPrefix(asList("PATH"), partial);
+        if (complete == 3) return filterPrefix(getNodeIds(), partial);
+        if (complete == 4) return filterPrefix(asList("TO"), partial);
+        if (complete == 5) return filterPrefix(getNodeIds(), partial);
+        if (complete == 6) return filterPrefix(asList("WEIGHT"), partial);
+        if (complete == 8) return filterPrefix(asList("TYPE"), partial);
+        if (complete == 9) return filterPrefix(getRelTypeNames(), partial);
+        return Collections.emptyList();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  REMOVE PROPERTY <type> <property>
+    // ═══════════════════════════════════════════════════════════════
+
+    private List<String> suggestRemove(String[] tokens, int complete, String partial) {
+        if (complete == 1) return filterPrefix(asList("PROPERTY"), partial);
+        if (complete == 2) {
+            List<String> all = new ArrayList<>(getNodeTypeNames());
+            all.addAll(getRelTypeNames());
+            return filterPrefix(all, partial);
+        }
         return Collections.emptyList();
     }
 

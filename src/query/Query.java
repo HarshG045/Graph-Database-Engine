@@ -1,6 +1,8 @@
 package query;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -54,6 +56,7 @@ public class Query {
         // Export
         EXPORT_DOT,         // EXPORT DOT [<filepath>]
         EXPORT_CSV,         // EXPORT CSV [<filepath>]
+        IMPORT_CSV,         // IMPORT CSV <filepath>
 
         // Persistence
         SAVE,
@@ -66,6 +69,11 @@ public class Query {
         CLEAR,              // CLEAR / CLEAR ALL
         DESCRIBE,           // DESCRIBE <nodeId>
         HISTORY,            // HISTORY
+        ALTER_NODE_TYPE,    // ALTER NODE TYPE <name> ADD/REMOVE REQUIRED/OPTIONAL <prop>
+        ALTER_RELATIONSHIP_TYPE, // ALTER RELATIONSHIP TYPE <name> ADD/REMOVE ...
+        REMOVE_PROPERTY,    // REMOVE PROPERTY <key> FROM <nodeId>
+        EXPLAIN,            // EXPLAIN <query>
+        WEIGHTED_SHORTEST_PATH, // WEIGHTED SHORTEST PATH <src> TO <dst> WEIGHT <prop> [TYPE <rel>]
         UNKNOWN
     }
 
@@ -86,6 +94,31 @@ public class Query {
 
     private String conditionKey;     // WHERE clause key
     private String conditionValue;   // WHERE clause value
+    private String conditionOp;      // WHERE clause operator (=, !=, <, <=, >, >=)
+
+    // Compound conditions for AND/OR queries
+    private List<Condition> conditions;
+    private String conditionLogic;   // "AND" or "OR" (null = single condition)
+
+    /**
+     * Represents a single condition in a WHERE clause.
+     */
+    public static class Condition {
+        public final String key;
+        public final String operator; // =, !=, <, <=, >, >=
+        public final String value;
+
+        public Condition(String key, String operator, String value) {
+            this.key = key;
+            this.operator = operator;
+            this.value = value;
+        }
+
+        @Override
+        public String toString() {
+            return key + " " + operator + " " + value;
+        }
+    }
 
     // Properties for ADD NODE / ADD EDGE / UPDATE
     private final Map<String, String> properties;
@@ -132,6 +165,20 @@ public class Query {
 
     public String getConditionValue() { return conditionValue; }
     public void setConditionValue(String value) { this.conditionValue = value; }
+
+    public String getConditionOp() { return conditionOp != null ? conditionOp : "="; }
+    public void setConditionOp(String op) { this.conditionOp = op; }
+
+    public List<Condition> getConditions() { return conditions; }
+    public void setConditions(List<Condition> conditions) { this.conditions = conditions; }
+
+    public String getConditionLogic() { return conditionLogic; }
+    public void setConditionLogic(String logic) { this.conditionLogic = logic; }
+
+    public void addCondition(String key, String operator, String value) {
+        if (this.conditions == null) this.conditions = new ArrayList<>();
+        this.conditions.add(new Condition(key, operator, value));
+    }
 
     public Map<String, String> getProperties() { return properties; }
     public void addProperty(String key, String value) { properties.put(key, value); }

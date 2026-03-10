@@ -7,9 +7,11 @@ import index.PropertyIndex;
 import model.Edge;
 import model.Node;
 import model.NodeType;
+import model.PropertyValue;
 import model.RelationshipType;
 import schema.SchemaManager;
 import storage.GraphStorage;
+import storage.StorageManager;
 import traversal.TraversalEngine;
 
 import java.io.FileWriter;
@@ -228,6 +230,34 @@ public class QueryExecutor {
                     executeExportCsv(q);
                     break;
 
+                case IMPORT_CSV:
+                    executeImportCsv(q);
+                    break;
+
+                // ── Schema Evolution ────────────────────────────────────
+                case ALTER_NODE_TYPE:
+                    executeAlterNodeType(q);
+                    break;
+
+                case ALTER_RELATIONSHIP_TYPE:
+                    executeAlterRelType(q);
+                    break;
+
+                // ── Property Management ─────────────────────────────────
+                case REMOVE_PROPERTY:
+                    executeRemoveProperty(q);
+                    break;
+
+                // ── Weighted Shortest Path ──────────────────────────────
+                case WEIGHTED_SHORTEST_PATH:
+                    executeWeightedShortestPath(q);
+                    break;
+
+                // ── EXPLAIN ──────────────────────────────────────────────
+                case EXPLAIN:
+                    executeExplain(q);
+                    break;
+
                 // ── History ─────────────────────────────────────────────
                 case HISTORY:
                     executeHistory();
@@ -251,17 +281,69 @@ public class QueryExecutor {
         List<Node> results;
         String type  = (q.getNodeType() != null && !q.getNodeType().isEmpty())
                         ? q.getNodeType() : null;
-        String key   = q.getConditionKey();
-        String value = q.getConditionValue();
 
-        if (type != null && key != null) {
-            results = nodeManager.getNodesByTypeAndProperty(type, key, value);
-        } else if (type != null) {
+        boolean hasConditions = q.getConditions() != null && !q.getConditions().isEmpty();
+        boolean hasSingleCondition = q.getConditionKey() != null && !hasConditions;
+
+        // Start with type-based filtering (uses type index if available)
+        if (type != null) {
             results = nodeManager.getNodesByType(type);
-        } else if (key != null) {
-            results = nodeManager.getNodesByProperty(key, value);
         } else {
             results = nodeManager.getAllNodes();
+        }
+
+        // Apply compound conditions (AND/OR)
+        if (hasConditions) {
+            String logic = q.getConditionLogic(); // "AND" or "OR"
+            List<Query.Condition> conds = q.getConditions();
+            List<Node> filtered = new ArrayList<>();
+            for (Node n : results) {
+                boolean match;
+                if ("OR".equals(logic)) {
+                    match = false;
+                    for (Query.Condition c : conds) {
+                        String propVal = n.getProperty(c.key);
+                        if (propVal != null && PropertyValue.evaluate(propVal, c.operator, c.value)) {
+                            match = true;
+                            break;
+                        }
+                    }
+                } else {
+                    // AND (default)
+                    match = true;
+                    for (Query.Condition c : conds) {
+                        String propVal = n.getProperty(c.key);
+                        if (propVal == null || !PropertyValue.evaluate(propVal, c.operator, c.value)) {
+                            match = false;
+                            break;
+                        }
+                    }
+                }
+                if (match) filtered.add(n);
+            }
+            results = filtered;
+        } else if (hasSingleCondition) {
+            // Single condition with operator support
+            String key = q.getConditionKey();
+            String op = q.getConditionOp();
+            String value = q.getConditionValue();
+
+            if ("=".equals(op) && type != null) {
+                // Use the index for exact match
+                results = nodeManager.getNodesByTypeAndProperty(type, key, value);
+            } else if ("=".equals(op) && type == null) {
+                results = nodeManager.getNodesByProperty(key, value);
+            } else {
+                // Range query — must scan
+                List<Node> filtered = new ArrayList<>();
+                for (Node n : results) {
+                    String propVal = n.getProperty(key);
+                    if (propVal != null && PropertyValue.evaluate(propVal, op, value)) {
+                        filtered.add(n);
+                    }
+                }
+                results = filtered;
+            }
         }
 
         printNodeList("FIND Result", results);
@@ -535,9 +617,10 @@ public class QueryExecutor {
         sb.append("}\n");
 
         if (q.getFilePath() != null) {
-            try (PrintWriter pw = new PrintWriter(new FileWriter(q.getFilePath()))) {
+            String safePath = StorageManager.validatePath(q.getFilePath());
+            try (PrintWriter pw = new PrintWriter(new FileWriter(safePath))) {
                 pw.print(sb);
-                System.out.println("[EXPORT] DOT file saved to: " + q.getFilePath());
+                System.out.println("[EXPORT] DOT file saved to: " + safePath);
             } catch (IOException ex) {
                 System.out.println("[EXPORT] Failed to write file: " + ex.getMessage());
             }
@@ -582,9 +665,10 @@ public class QueryExecutor {
         }
 
         if (q.getFilePath() != null) {
-            try (PrintWriter pw = new PrintWriter(new FileWriter(q.getFilePath()))) {
+            String safePath = StorageManager.validatePath(q.getFilePath());
+            try (PrintWriter pw = new PrintWriter(new FileWriter(safePath))) {
                 pw.print(sb);
-                System.out.println("[EXPORT] CSV file saved to: " + q.getFilePath());
+                System.out.println("[EXPORT] CSV file saved to: " + safePath);
             } catch (IOException ex) {
                 System.out.println("[EXPORT] Failed to write file: " + ex.getMessage());
             }
@@ -606,5 +690,367 @@ public class QueryExecutor {
         for (int i = 0; i < commandHistory.size(); i++) {
             System.out.println("  " + (i + 1) + ". " + commandHistory.get(i));
         }
+    }
+
+    // ─────────────────────────────────────────────
+    //  IMPORT CSV execution
+    // ─────────────────────────────────────────────
+
+    private void executeImportCsv(Query q) {
+        String filePath = q.getFilePath();
+        if (filePath == null || filePath.isEmpty()) {
+            System.out.println("[IMPORT] Usage: IMPORT CSV <filepath>");
+            return;
+        }
+        String safePath = StorageManager.validatePath(filePath);
+
+        try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(safePath))) {
+            String line;
+            String section = null;
+            int nodesImported = 0;
+            int edgesImported = 0;
+
+            while ((line = br.readLine()) != null) {
+                line = line.trim();
+                if (line.isEmpty()) continue;
+
+                if (line.startsWith("# NODES")) {
+                    section = "NODES";
+                    continue;
+                }
+                if (line.startsWith("# EDGES")) {
+                    section = "EDGES";
+                    continue;
+                }
+                if (line.startsWith("node_id,") || line.startsWith("source_id,")) {
+                    continue; // skip header
+                }
+
+                if ("NODES".equals(section)) {
+                    // node_id,type,"key1=val1;key2=val2"
+                    String[] cols = parseCsvLine(line);
+                    if (cols.length >= 2) {
+                        String id = cols[0];
+                        String type = cols[1];
+                        java.util.Map<String, String> props = new java.util.HashMap<>();
+                        if (cols.length >= 3) {
+                            String propsStr = cols[2].replace("\"", "");
+                            if (!propsStr.isEmpty()) {
+                                for (String pair : propsStr.split(";")) {
+                                    String[] kv = pair.split("=", 2);
+                                    if (kv.length == 2) props.put(kv[0].trim(), kv[1].trim());
+                                }
+                            }
+                        }
+                        try {
+                            if (props.isEmpty()) {
+                                nodeManager.addNode(id, type);
+                            } else {
+                                nodeManager.addNode(id, type, props);
+                            }
+                            nodesImported++;
+                        } catch (Exception e) {
+                            System.out.println("[IMPORT] Skipping node " + id + ": " + e.getMessage());
+                        }
+                    }
+                } else if ("EDGES".equals(section)) {
+                    // source_id,destination_id,relationship_type,"key1=val1;key2=val2"
+                    String[] cols = parseCsvLine(line);
+                    if (cols.length >= 3) {
+                        String src = cols[0];
+                        String dst = cols[1];
+                        String relType = cols[2];
+                        java.util.Map<String, String> props = new java.util.HashMap<>();
+                        if (cols.length >= 4) {
+                            String propsStr = cols[3].replace("\"", "");
+                            if (!propsStr.isEmpty()) {
+                                for (String pair : propsStr.split(";")) {
+                                    String[] kv = pair.split("=", 2);
+                                    if (kv.length == 2) props.put(kv[0].trim(), kv[1].trim());
+                                }
+                            }
+                        }
+                        try {
+                            if (props.isEmpty()) {
+                                edgeManager.addEdge(src, dst, relType);
+                            } else {
+                                edgeManager.addEdge(src, dst, relType, props);
+                            }
+                            edgesImported++;
+                        } catch (Exception e) {
+                            System.out.println("[IMPORT] Skipping edge " + src + "->" + dst + ": " + e.getMessage());
+                        }
+                    }
+                }
+            }
+            System.out.println("[IMPORT] CSV imported from: " + safePath
+                    + "  (nodes=" + nodesImported + ", edges=" + edgesImported + ")");
+        } catch (IOException ex) {
+            System.out.println("[IMPORT] Failed to read file: " + ex.getMessage());
+        }
+    }
+
+    /**
+     * Simple CSV line parser that handles quoted fields.
+     */
+    private String[] parseCsvLine(String line) {
+        List<String> fields = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inQuotes = false;
+        for (int i = 0; i < line.length(); i++) {
+            char c = line.charAt(i);
+            if (c == '"') {
+                inQuotes = !inQuotes;
+            } else if (c == ',' && !inQuotes) {
+                fields.add(current.toString());
+                current = new StringBuilder();
+            } else {
+                current.append(c);
+            }
+        }
+        fields.add(current.toString());
+        return fields.toArray(new String[0]);
+    }
+
+    // ─────────────────────────────────────────────
+    //  ALTER TYPE execution
+    // ─────────────────────────────────────────────
+
+    private void executeAlterNodeType(Query q) {
+        String typeName = q.getNodeType();
+        NodeType nt = schemaManager.getNodeType(typeName);
+        if (nt == null) {
+            throw new IllegalArgumentException("[SCHEMA] Node type not found: " + typeName);
+        }
+
+        String op = q.getConditionOp();
+        if ("ADD_REQUIRED".equals(op)) {
+            String prop = q.getRequiredProps();
+            if (prop != null) {
+                nt.addRequiredProperty(prop);
+                System.out.println("[SCHEMA] Added required property '" + prop
+                        + "' to node type '" + typeName + "'");
+            }
+        } else if ("ADD_OPTIONAL".equals(op)) {
+            String prop = q.getOptionalProps();
+            if (prop != null) {
+                nt.addOptionalProperty(prop);
+                System.out.println("[SCHEMA] Added optional property '" + prop
+                        + "' to node type '" + typeName + "'");
+            }
+        } else if ("REMOVE".equals(op)) {
+            String prop = q.getConditionKey();
+            if (prop != null) {
+                nt.removeProperty(prop);
+                System.out.println("[SCHEMA] Removed property '" + prop
+                        + "' from node type '" + typeName + "'");
+            }
+        }
+    }
+
+    private void executeAlterRelType(Query q) {
+        String typeName = q.getRelationshipType();
+        RelationshipType rt = schemaManager.getRelationshipType(typeName);
+        if (rt == null) {
+            throw new IllegalArgumentException("[SCHEMA] Relationship type not found: " + typeName);
+        }
+
+        String op = q.getConditionOp();
+        if ("ADD_REQUIRED".equals(op)) {
+            String prop = q.getRequiredProps();
+            if (prop != null) {
+                rt.addRequiredProperty(prop);
+                System.out.println("[SCHEMA] Added required property '" + prop
+                        + "' to relationship type '" + typeName + "'");
+            }
+        } else if ("ADD_OPTIONAL".equals(op)) {
+            String prop = q.getOptionalProps();
+            if (prop != null) {
+                rt.addOptionalProperty(prop);
+                System.out.println("[SCHEMA] Added optional property '" + prop
+                        + "' to relationship type '" + typeName + "'");
+            }
+        } else if ("REMOVE".equals(op)) {
+            String prop = q.getConditionKey();
+            if (prop != null) {
+                rt.removeProperty(prop);
+                System.out.println("[SCHEMA] Removed property '" + prop
+                        + "' from relationship type '" + typeName + "'");
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────
+    //  REMOVE PROPERTY execution
+    // ─────────────────────────────────────────────
+
+    private void executeRemoveProperty(Query q) {
+        String key = q.getConditionKey();
+        String nodeId = q.getNodeId();
+        String typeName = q.getNodeType();
+
+        // ── Schema removal: REMOVE PROPERTY <typeName> <property> ──
+        if (typeName != null && nodeId == null) {
+            // Check node types first
+            if (schemaManager.nodeTypeExists(typeName)) {
+                NodeType nt = schemaManager.getNodeType(typeName);
+                if (nt.isRequiredProperty(key)) {
+                    // Check if any nodes have this property set
+                    for (Node n : storage.getNodesByType(typeName)) {
+                        if (n.hasProperty(key)) {
+                            throw new IllegalArgumentException(
+                                    "[CONSTRAINT] Cannot remove required property '" + key
+                                    + "' — node '" + n.getId() + "' still has it.");
+                        }
+                    }
+                }
+                nt.removeProperty(key);
+                System.out.println("[SCHEMA] Removed property '" + key
+                        + "' from node type '" + typeName + "'");
+                return;
+            }
+            // Check relationship types
+            if (schemaManager.relationshipTypeExists(typeName)) {
+                RelationshipType rt = schemaManager.getRelationshipType(typeName);
+                rt.removeProperty(key);
+                System.out.println("[SCHEMA] Removed property '" + key
+                        + "' from relationship type '" + typeName + "'");
+                return;
+            }
+            System.out.println("[ERROR] Type not found: " + typeName);
+            return;
+        }
+
+        // ── Node-instance removal: REMOVE PROPERTY <key> FROM <nodeId> ──
+        if (key == null || nodeId == null) {
+            System.out.println("[ERROR] Usage: REMOVE PROPERTY <type> <property>  or  REMOVE PROPERTY <key> FROM <nodeId>");
+            return;
+        }
+
+        Node node = storage.getNode(nodeId);
+        if (node == null) {
+            throw new IllegalArgumentException("[NODE] Node not found: " + nodeId);
+        }
+
+        // Prevent removal of required properties
+        NodeType nt = schemaManager.getNodeType(node.getType());
+        if (nt != null && nt.isRequiredProperty(key)) {
+            throw new IllegalArgumentException(
+                    "[CONSTRAINT] Cannot remove required property '" + key
+                    + "' from node type '" + node.getType() + "'");
+        }
+
+        String oldValue = node.getProperty(key);
+        if (oldValue == null) {
+            System.out.println("[NODE] Property '" + key + "' does not exist on node " + nodeId);
+            return;
+        }
+        node.removeProperty(key);
+        propertyIndex.updateEntry(nodeId, key, oldValue, null);
+        System.out.println("[NODE] Removed property '" + key + "' from node " + nodeId);
+    }
+
+    // ─────────────────────────────────────────────
+    //  WEIGHTED SHORTEST PATH execution
+    // ─────────────────────────────────────────────
+
+    private void executeWeightedShortestPath(Query q) {
+        String weightProp = q.getConditionKey();
+        if (weightProp == null) weightProp = "weight";
+
+        List<Node> path = traversalEngine.weightedShortestPath(
+                q.getNodeId(), q.getSecondNodeId(), weightProp, q.getRelationshipType());
+
+        if (path.isEmpty()) {
+            System.out.println("  (no path)");
+            return;
+        }
+
+        double totalWeight = traversalEngine.getPathWeight(
+                path, weightProp, q.getRelationshipType());
+
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < path.size(); i++) {
+            sb.append(path.get(i).getId());
+            if (i < path.size() - 1) sb.append(" → ");
+        }
+        System.out.println("  Path: " + sb);
+        System.out.println("  Total weight: " + String.format("%.2f", totalWeight));
+        System.out.println("  Nodes:");
+        for (Node n : path) System.out.println("    " + n);
+    }
+
+    // ─────────────────────────────────────────────
+    //  EXPLAIN execution
+    // ─────────────────────────────────────────────
+
+    private void executeExplain(Query q) {
+        String innerCmd = q.getFilePath();
+        if (innerCmd == null || innerCmd.isEmpty()) {
+            System.out.println("[EXPLAIN] Usage: EXPLAIN <query>");
+            return;
+        }
+
+        QueryParser parser = new QueryParser();
+        Query inner = parser.parse(innerCmd);
+
+        System.out.println("╔══════════════════════════════════════════════════════╗");
+        System.out.println("║                    QUERY PLAN                        ║");
+        System.out.println("╠══════════════════════════════════════════════════════╣");
+        System.out.println("  Command type  : " + inner.getType());
+
+        if (inner.getType() == Query.Type.FIND) {
+            String type = inner.getNodeType();
+            String key = inner.getConditionKey();
+            String op = inner.getConditionOp();
+            boolean hasCompound = inner.getConditions() != null && !inner.getConditions().isEmpty();
+
+            if (type != null && !type.isEmpty()) {
+                System.out.println("  Type filter   : " + type + "  → uses TYPE INDEX (O(k))");
+            }
+
+            if (hasCompound) {
+                System.out.println("  Logic         : " + inner.getConditionLogic());
+                for (Query.Condition c : inner.getConditions()) {
+                    boolean canIndex = "=".equals(c.operator);
+                    System.out.println("  Condition     : " + c
+                            + (canIndex ? "  → INDEX eligible" : "  → SCAN required"));
+                }
+            } else if (key != null) {
+                boolean isExact = "=".equals(op);
+                System.out.println("  Condition     : " + key + " " + op + " " + inner.getConditionValue());
+                if (isExact) {
+                    boolean indexed = propertyIndex.hasEntry(key, inner.getConditionValue());
+                    System.out.println("  Strategy      : PROPERTY INDEX lookup"
+                            + (indexed ? " (entries exist)" : " (no entries yet)"));
+                } else {
+                    System.out.println("  Strategy      : FULL SCAN with filter (range operator: " + op + ")");
+                }
+            } else if (type != null) {
+                System.out.println("  Strategy      : TYPE INDEX scan (O(k), k=nodes of type)");
+            } else {
+                System.out.println("  Strategy      : FULL NODE SCAN (O(V))");
+            }
+        } else if (inner.getType() == Query.Type.SHORTEST_PATH) {
+            System.out.println("  Algorithm     : BFS (unweighted)");
+            System.out.println("  Complexity    : O(V + E)");
+            System.out.println("  From          : " + inner.getNodeId());
+            System.out.println("  To            : " + inner.getSecondNodeId());
+            if (inner.getRelationshipType() != null) {
+                System.out.println("  Edge filter   : " + inner.getRelationshipType());
+            }
+        } else if (inner.getType() == Query.Type.WEIGHTED_SHORTEST_PATH) {
+            System.out.println("  Algorithm     : Dijkstra (weighted)");
+            System.out.println("  Complexity    : O((V + E) log V)");
+            System.out.println("  Weight prop   : " + inner.getConditionKey());
+        } else if (inner.getType() == Query.Type.BFS || inner.getType() == Query.Type.DFS) {
+            System.out.println("  Algorithm     : " + inner.getType());
+            System.out.println("  Complexity    : O(V + E)");
+            System.out.println("  Start node    : " + inner.getNodeId());
+        } else {
+            System.out.println("  (no detailed plan available for this command type)");
+        }
+
+        System.out.println("╚══════════════════════════════════════════════════════╝");
     }
 }

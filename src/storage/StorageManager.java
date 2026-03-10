@@ -53,6 +53,34 @@ public class StorageManager {
     private static final String SEC_NODES      = "[NODES]";
     private static final String SEC_EDGES      = "[EDGES]";
 
+    /**
+     * Validates that a file path is safe: no path-traversal sequences,
+     * must end with an allowed extension, and must not be absolute.
+     */
+    public static String validatePath(String filePath) {
+        if (filePath == null || filePath.trim().isEmpty()) return DEFAULT_FILE;
+        String path = filePath.trim();
+
+        // Block obvious path-traversal
+        if (path.contains("..") || path.startsWith("/") || path.startsWith("\\")) {
+            throw new IllegalArgumentException(
+                    "[STORAGE] Invalid path — absolute or traversal paths are not allowed: " + path);
+        }
+        // Windows drive-letter paths
+        if (path.length() >= 2 && path.charAt(1) == ':') {
+            throw new IllegalArgumentException(
+                    "[STORAGE] Invalid path — absolute paths are not allowed: " + path);
+        }
+        // Allow only safe extensions
+        String lower = path.toLowerCase();
+        if (!(lower.endsWith(".gdb") || lower.endsWith(".csv") || lower.endsWith(".dot")
+              || lower.endsWith(".txt"))) {
+            throw new IllegalArgumentException(
+                    "[STORAGE] Invalid file extension. Allowed: .gdb, .csv, .dot, .txt");
+        }
+        return path;
+    }
+
     // ─────────────────────────────────────────────
     //  SAVE
     // ─────────────────────────────────────────────
@@ -66,7 +94,7 @@ public class StorageManager {
                      GraphStorage graphStorage,
                      String filePath) throws IOException {
 
-        String path = (filePath != null && !filePath.isEmpty()) ? filePath : DEFAULT_FILE;
+        String path = validatePath(filePath);
 
         // Create parent directories if they don't exist
         File file = new File(path);
@@ -138,7 +166,7 @@ public class StorageManager {
                      PropertyIndex propertyIndex,
                      String filePath) throws IOException {
 
-        String path = (filePath != null && !filePath.isEmpty()) ? filePath : DEFAULT_FILE;
+        String path = validatePath(filePath);
 
         // Clear existing state
         graphStorage.clear();
@@ -281,13 +309,12 @@ public class StorageManager {
     }
 
     private String escape(String val) {
-        // Escape backslash FIRST so subsequent replacements don't double-escape it.
-        return val.replace("\\", "~b").replace("|", "~p").replace(";", "~s").replace("=", "~e");
+        // Escape tilde FIRST so subsequent replacements don't corrupt literal tildes.
+        return val.replace("~", "~t").replace("\\", "~b").replace("|", "~p").replace(";", "~s").replace("=", "~e");
     }
 
     private String unescape(String val) {
-        // Unescape letter-codes first, THEN restore the tilde escape last
-        // so ~b sequences left after prior steps resolve cleanly.
-        return val.replace("~p", "|").replace("~s", ";").replace("~e", "=").replace("~b", "\\");
+        // Unescape letter-codes first, THEN restore tilde last.
+        return val.replace("~p", "|").replace("~s", ";").replace("~e", "=").replace("~b", "\\").replace("~t", "~");
     }
 }

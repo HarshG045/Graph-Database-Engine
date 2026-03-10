@@ -37,11 +37,23 @@ FIND Company WHERE industry=Software
 NEIGHBORS u1
 DESCRIBE u1
 
+REM ── RANGE QUERIES (new) ─────────────────────────────────────
+FIND User WHERE age > 25
+FIND User WHERE age <= 30
+FIND Company WHERE name != TechCorp
+
+REM ── COMPOUND CONDITIONS (new) ───────────────────────────────
+FIND User WHERE age >= 28 AND age <= 35
+FIND User WHERE name = Alice OR name = Dave
+
 REM ── TRAVERSAL ───────────────────────────────────────────────
 BFS u1
 DFS u1
 SHORTEST PATH u1 TO u4
 SHORTEST PATH u1 TO u4 TYPE FRIENDS
+
+REM ── WEIGHTED SHORTEST PATH (new) ────────────────────────────
+WEIGHTED SHORTEST PATH u1 TO u4 WEIGHT since TYPE FRIENDS
 
 REM ── GRAPH ANALYSIS ──────────────────────────────────────────
 DEGREE u1
@@ -65,6 +77,20 @@ REM ── UPDATE DATA ───────────────────
 UPDATE NODE u2 SET age=26
 FIND User WHERE age=26
 
+REM ── ALTER TYPE (new) ────────────────────────────────────────
+ALTER NODE TYPE User ADD OPTIONAL phone
+ALTER RELATIONSHIP TYPE FRIENDS ADD OPTIONAL strength
+SHOW SCHEMA
+
+REM ── REMOVE PROPERTY from schema (new) ───────────────────────
+REMOVE PROPERTY FRIENDS strength
+SHOW SCHEMA
+
+REM ── EXPLAIN / QUERY PLAN (new) ──────────────────────────────
+EXPLAIN FIND User WHERE age > 25
+EXPLAIN FIND User WHERE name = Alice
+EXPLAIN SHORTEST PATH u1 TO u4
+
 REM ── EXPORT ──────────────────────────────────────────────────
 EXPORT DOT
 EXPORT CSV
@@ -72,8 +98,9 @@ EXPORT CSV
 REM ── INDEX ───────────────────────────────────────────────────
 SHOW INDEX
 
-REM ── PERSISTENCE ─────────────────────────────────────────────
+REM ── PERSISTENCE (validates on load) ─────────────────────────
 SAVE demo_graph.gdb
+LOAD demo_graph.gdb
 
 REM ── COMMAND HISTORY ─────────────────────────────────────────
 HISTORY

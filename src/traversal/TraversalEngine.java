@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
 
@@ -437,5 +438,157 @@ public class TraversalEngine {
             }
         }
         return false;
+    }
+
+    // ─────────────────────────────────────────────
+    //  Weighted Shortest Path (Dijkstra)
+    // ─────────────────────────────────────────────
+
+    /**
+     * Finds the shortest weighted path between two nodes using Dijkstra's algorithm.
+     * Edge weights are read from the specified property key.
+     * Edges without the weight property are assigned a default weight of 1.0.
+     *
+     * @param startId          Source node ID
+     * @param endId            Target node ID
+     * @param weightProperty   Edge property key to use as weight (e.g., "distance")
+     * @param relationshipType Optional filter — null means all edge types
+     * @return ordered list of nodes along the path, or empty if no path exists
+     */
+    public List<Node> weightedShortestPath(String startId, String endId,
+                                            String weightProperty, String relationshipType) {
+        validateNodeExists(startId);
+        validateNodeExists(endId);
+
+        if (startId.equals(endId)) {
+            List<Node> single = new ArrayList<>();
+            single.add(storage.getNode(startId));
+            return single;
+        }
+
+        // dist[nodeId] = best known distance
+        Map<String, Double> dist = new HashMap<>();
+        Map<String, String> parent = new HashMap<>();
+        Set<String> visited = new HashSet<>();
+
+        // PQ entries: [distance, nodeId]
+        PriorityQueue<double[]> pq = new PriorityQueue<>((a, b) -> Double.compare(a[0], b[0]));
+
+        // Use a parallel map from index to nodeId for PQ
+        Map<String, Integer> nodeIdxMap = new HashMap<>();
+        List<String> nodeIdList = new ArrayList<>();
+
+        dist.put(startId, 0.0);
+        parent.put(startId, null);
+        // Store index in array position [1]
+        int startIdx = nodeIdList.size();
+        nodeIdList.add(startId);
+        nodeIdxMap.put(startId, startIdx);
+        pq.add(new double[]{0.0, startIdx});
+
+        System.out.println("[DIJKSTRA] Searching: " + startId + " → " + endId
+                + " using weight property '" + weightProperty + "'"
+                + (relationshipType != null ? " via [" + relationshipType + "]" : ""));
+
+        boolean found = false;
+        while (!pq.isEmpty()) {
+            double[] entry = pq.poll();
+            double currentDist = entry[0];
+            String currentId = nodeIdList.get((int) entry[1]);
+
+            if (visited.contains(currentId)) continue;
+            visited.add(currentId);
+
+            if (currentId.equals(endId)) {
+                found = true;
+                break;
+            }
+
+            for (Edge edge : storage.getOutgoingEdges(currentId)) {
+                if (relationshipType != null
+                        && !edge.getRelationshipType().equals(relationshipType)) {
+                    continue;
+                }
+
+                String neighborId = edge.getDestinationId();
+                if (visited.contains(neighborId)) continue;
+
+                // Read weight from edge property, default to 1.0
+                double weight = 1.0;
+                String weightStr = edge.getProperty(weightProperty);
+                if (weightStr != null) {
+                    try {
+                        weight = Double.parseDouble(weightStr);
+                        if (weight < 0) {
+                            System.out.println("[DIJKSTRA] Warning: negative weight on edge "
+                                    + edge + ", using absolute value.");
+                            weight = Math.abs(weight);
+                        }
+                    } catch (NumberFormatException e) {
+                        weight = 1.0;
+                    }
+                }
+
+                double newDist = currentDist + weight;
+                if (newDist < dist.getOrDefault(neighborId, Double.MAX_VALUE)) {
+                    dist.put(neighborId, newDist);
+                    parent.put(neighborId, currentId);
+                    int idx;
+                    if (nodeIdxMap.containsKey(neighborId)) {
+                        idx = nodeIdxMap.get(neighborId);
+                    } else {
+                        idx = nodeIdList.size();
+                        nodeIdList.add(neighborId);
+                        nodeIdxMap.put(neighborId, idx);
+                    }
+                    pq.add(new double[]{newDist, idx});
+                }
+            }
+        }
+
+        if (!found) {
+            System.out.println("[DIJKSTRA] No path found between " + startId + " and " + endId);
+            return new ArrayList<>();
+        }
+
+        // Reconstruct path
+        List<Node> path = new ArrayList<>();
+        String current = endId;
+        while (current != null) {
+            Node node = storage.getNode(current);
+            if (node != null) path.add(node);
+            current = parent.get(current);
+        }
+        Collections.reverse(path);
+
+        System.out.println("[DIJKSTRA] Path length: " + (path.size() - 1) + " hops, total weight: "
+                + String.format("%.2f", dist.get(endId)));
+        return path;
+    }
+
+    /**
+     * Returns the total weight of a weighted path.
+     */
+    public double getPathWeight(List<Node> path, String weightProperty, String relationshipType) {
+        if (path == null || path.size() < 2) return 0;
+        double total = 0;
+        for (int i = 0; i < path.size() - 1; i++) {
+            String srcId = path.get(i).getId();
+            String dstId = path.get(i + 1).getId();
+            for (Edge e : storage.getOutgoingEdges(srcId)) {
+                if (e.getDestinationId().equals(dstId)) {
+                    if (relationshipType != null && !e.getRelationshipType().equals(relationshipType))
+                        continue;
+                    String ws = e.getProperty(weightProperty);
+                    if (ws != null) {
+                        try { total += Double.parseDouble(ws); } catch (NumberFormatException ex) { total += 1; }
+                    } else {
+                        total += 1;
+                    }
+                    break;
+                }
+            }
+        }
+        return total;
     }
 }

@@ -1,7 +1,9 @@
 package model;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Represents a directed edge (relationship) between two nodes.
@@ -42,7 +44,7 @@ public class Edge {
     }
 
     public Map<String, String> getProperties() {
-        return properties;
+        return Collections.unmodifiableMap(properties);
     }
 
     public String getProperty(String key) {
@@ -75,6 +77,6 @@ public class Edge {
 
     @Override
     public int hashCode() {
-        return (sourceId + destinationId + relationshipType).hashCode();
+        return Objects.hash(sourceId, destinationId, relationshipType);
     }
 }
